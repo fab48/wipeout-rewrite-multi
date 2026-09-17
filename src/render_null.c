@@ -15,6 +15,12 @@ void render_set_screen_size(vec2i_t size) {
 void render_set_resolution(render_resolution_t res) {
 	(void) res;
 }
+void render_scene_post(float motion_blur) {
+	(void) motion_blur;
+}
+void render_set_material(render_material_t material) {
+	(void) material;
+}
 void render_set_post_effect(render_post_effect_t post) {
 	(void) post;
 }

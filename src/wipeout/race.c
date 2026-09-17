@@ -109,7 +109,11 @@ void race_update(void) {
 	ships_draw();
 	droid_draw(&g.droid);
 	weapons_draw();
+	render_set_material(RENDER_MATERIAL_UNLIT);
 	particles_draw();
+
+	// Speed dependent motion blur and bloom; applied before the HUD is drawn
+	render_scene_post(clamp((g.ships[g.pilot].speed - 5000.0) / 20000.0, 0.0, 1.0));
 
 	// Draw 2d
 	render_set_screen_position(vec2(0,0));

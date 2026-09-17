@@ -382,5 +382,6 @@ typedef union Prm {
 
 Object *objects_load(char *name, texture_list_t tl);
 void object_draw(Object *object, mat4_t *mat);
+void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool with_flag);
 
 #endif

@@ -1,5 +1,7 @@
+#include "../mem.h"
 #include "../utils.h"
 #include "../system.h"
+#include "../render.h"
 
 #include "object.h"
 #include "track.h"
@@ -11,6 +13,39 @@
 #include "game.h"
 #include "race.h"
 #include "sfx.h"
+
+#define EXHAUST_FLARE_TEXTURE_SIZE 128
+
+static uint16_t exhaust_flare_texture;
+
+// Procedural flare: a soft radial glow with a diagonal 4 point star. The
+// intensity lives in the alpha channel, so it can be tinted through the vertex
+// color and drawn with RENDER_BLEND_LIGHTER.
+static uint16_t ship_create_exhaust_flare_texture(void) {
+	int size = EXHAUST_FLARE_TEXTURE_SIZE;
+	rgba_t *pixels = mem_temp_alloc(sizeof(rgba_t) * size * size);
+
+	for (int y = 0; y < size; y++) {
+		for (int x = 0; x < size; x++) {
+			float u = ((x + 0.5) / size) * 2.0 - 1.0;
+			float v = ((y + 0.5) / size) * 2.0 - 1.0;
+			float falloff = max(0.0, 1.0 - sqrtf(u * u + v * v));
+
+			float glow = falloff * falloff * falloff;
+			float core = powf(falloff, 12);
+
+			float diag = min(fabsf(u - v), fabsf(u + v)) * 0.7071 * 16.0;
+			float star = falloff * falloff * expf(-diag * diag);
+
+			float intensity = clamp(glow * 0.7 + core + star * 0.8, 0.0, 1.0);
+			pixels[y * size + x] = rgba(128, 128, 128, intensity * 255);
+		}
+	}
+
+	uint16_t texture = render_texture_create(size, size, pixels);
+	mem_temp_free(pixels);
+	return texture;
+}
 
 void ships_load(void) {
 	texture_list_t ship_textures = image_get_compressed_textures("wipeout/common/allsh.cmp");
@@ -44,7 +79,10 @@ void ships_load(void) {
 
 	for (int i = 0; i < len(g.ships); i++) {
 		g.ships[i].shadow_texture = shadow_textures_start + (i >> 1);
+		g.ships[i].exhaust_trail_valid = false;
 	}
+
+	exhaust_flare_texture = ship_create_exhaust_flare_texture();
 }
 
 
@@ -146,7 +184,16 @@ void ships_reset_exhaust_plumes(void) {
 }
 
 
+static bool ship_exhaust_is_hidden(int i) {
+	return (
+		(flags_is(g.ships[i].flags, SHIP_VIEW_INTERNAL) && flags_not(g.ships[i].flags, SHIP_IN_RESCUE)) ||
+		(g.race_type == RACE_TYPE_TIME_TRIAL && i != g.pilot)
+	);
+}
+
 void ships_draw(void) {
+	render_set_material(RENDER_MATERIAL_SHIP);
+
 	// Ship models
 	for (int i = 0; i < len(g.ships); i++) {
 		if (
@@ -161,6 +208,7 @@ void ships_draw(void) {
 
 
 	// Shadows
+	render_set_material(RENDER_MATERIAL_UNLIT);
 	render_set_model_mat(&mat4_identity());
 
 	render_set_depth_write(false);
@@ -178,8 +226,33 @@ void ships_draw(void) {
 		ship_draw_shadow(&g.ships[i]);
 	}
 
+	// Exhaust plumes, trails and flares; all additive, drawn after everything
+	// opaque so they never punch holes into the depth buffer
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+
+	render_set_depth_offset(0.0);
+	for (int i = 0; i < len(g.ships); i++) {
+		if (ship_exhaust_is_hidden(i)) {
+			continue;
+		}
+		ship_draw_exhaust_plume(&g.ships[i]);
+	}
+
+	render_set_model_mat(&mat4_identity());
+	render_set_depth_offset(-32.0);
+	render_set_cull_backface(false);
+	for (int i = 0; i < len(g.ships); i++) {
+		if (ship_exhaust_is_hidden(i)) {
+			continue;
+		}
+		ship_draw_exhaust_glow(&g.ships[i]);
+	}
+	render_set_cull_backface(true);
+
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
 	render_set_depth_offset(0.0);
 	render_set_depth_write(true);
+	render_set_material(RENDER_MATERIAL_SHIP);
 }
 
 
@@ -264,7 +337,11 @@ void ship_init(ship_t *self, section_t *section, int pilot, int inv_start_rank) 
 	self->angle.y = -atan2(direction.x, direction.z);
 }
 
-const rgba_t exhaust_plume_color = rgba(180,97,120,140);
+const rgba_t exhaust_plume_color = rgba(96,150,255,230);
+const rgba_t exhaust_plume_tip_color = rgba(16,40,255,40);
+const rgba_t exhaust_trail_color = rgba(32,72,255,255);
+const rgba_t exhaust_flare_color = rgba(48,96,255,255);
+const rgba_t exhaust_flare_core_color = rgba(128,144,200,255);
 
 void ship_init_exhaust_plume(ship_t *self) {
 	int16_t indices[64];
@@ -283,6 +360,10 @@ void ship_init_exhaust_plume(ship_t *self) {
 				indices[indices_len++] = prm.ft3->coords[2];
 
 				prm.ft3->color = exhaust_plume_color;
+				prm.ft3->texture = RENDER_NO_TEXTURE;
+				prm.ft3->u0 = prm.ft3->v0 = 0;
+				prm.ft3->u1 = prm.ft3->v1 = 0;
+				prm.ft3->u2 = prm.ft3->v2 = 0;
 				prm.ft3++;
 				break;
 			case PRM_TYPE_GT3:
@@ -293,6 +374,10 @@ void ship_init_exhaust_plume(ship_t *self) {
 				for (int j = 0; j < 3; j++) {
 					prm.gt3->color[j] = exhaust_plume_color;
 				}
+				prm.gt3->texture = RENDER_NO_TEXTURE;
+				prm.gt3->u0 = prm.gt3->v0 = 0;
+				prm.gt3->u1 = prm.gt3->v1 = 0;
+				prm.gt3->u2 = prm.gt3->v2 = 0;
 				prm.gt3++;
 				break;
 			default:
@@ -350,6 +435,62 @@ void ship_init_exhaust_plume(ship_t *self) {
 			self->exhaust_plume[j].initial = self->model->vertices[shared[j]];
 		}
 	}
+
+	// Fade the gouraud shaded plumes out towards their tip and find the center
+	// of each plume's base (the nozzle), which is where the flare sits
+	vec3_t base_sum[3] = {vec3(0, 0, 0), vec3(0, 0, 0), vec3(0, 0, 0)};
+	int base_count[3] = {0, 0, 0};
+
+	prm.primitive = self->model->primitives;
+	for (int i = 0; i < self->model->primitives_len; i++) {
+		switch (prm.primitive->type) {
+		case PRM_TYPE_F3: prm.f3++; break;
+		case PRM_TYPE_F4: prm.f4++; break;
+		case PRM_TYPE_FT4: prm.ft4++; break;
+		case PRM_TYPE_G3: prm.g3++; break;
+		case PRM_TYPE_G4: prm.g4++; break;
+		case PRM_TYPE_GT4: prm.gt4++; break;
+		case PRM_TYPE_FT3:
+		case PRM_TYPE_GT3:
+			if (flags_is(prm.primitive->flag, PRM_SHIP_ENGINE)) {
+				// coords[] is at the same offset for FT3 and GT3
+				int16_t *coords = prm.ft3->coords;
+				for (int k = 0; k < 3; k++) {
+					if (shared[k] == -1 || (coords[0] != shared[k] && coords[1] != shared[k] && coords[2] != shared[k])) {
+						continue;
+					}
+					for (int j = 0; j < 3; j++) {
+						if (coords[j] == shared[k]) {
+							if (prm.primitive->type == PRM_TYPE_GT3) {
+								prm.gt3->color[j] = exhaust_plume_tip_color;
+							}
+						}
+						else {
+							base_sum[k] = vec3_add(base_sum[k], self->model->vertices[coords[j]]);
+							base_count[k]++;
+						}
+					}
+				}
+			}
+			if (prm.primitive->type == PRM_TYPE_GT3) {
+				prm.gt3++;
+			}
+			else {
+				prm.ft3++;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	for (int k = 0; k < 3; k++) {
+		if (shared[k] != -1) {
+			self->exhaust_plume[k].base = base_count[k] > 0
+				? vec3_mulf(base_sum[k], 1.0 / base_count[k])
+				: self->exhaust_plume[k].initial;
+		}
+	}
 }
 
 void ship_reset_exhaust_plume(ship_t* self) {
@@ -361,7 +502,164 @@ void ship_reset_exhaust_plume(ship_t* self) {
 
 
 void ship_draw(ship_t *self) {
-	object_draw(self->model, &self->mat);
+	// The engine primitives are drawn separately in ship_draw_exhaust_plume()
+	object_draw_filtered(self->model, &self->mat, PRM_SHIP_ENGINE, false);
+}
+
+void ship_draw_exhaust_plume(ship_t *self) {
+	object_draw_filtered(self->model, &self->mat, PRM_SHIP_ENGINE, true);
+}
+
+static void ship_draw_exhaust_trail(ship_t *self, vec3_t *trail) {
+	float intensity = 0.25 + 0.75 * self->exhaust_intensity;
+	vec3_t side = vec3(0, 0, 0);
+
+	vec3_t prev_pos[3];
+	rgba_t prev_color[3];
+	bool has_prev = false;
+
+	for (int i = 0; i < SHIP_EXHAUST_TRAIL_POINTS; i++) {
+		// Ribbon side vector at this point, facing the camera. Keep the last
+		// known one if the points are too close together.
+		int a = i == 0 ? 0 : i - 1;
+		int b = i == SHIP_EXHAUST_TRAIL_POINTS - 1 ? i : i + 1;
+		vec3_t dir = vec3_sub(trail[a], trail[b]);
+		vec3_t new_side = vec3_cross(dir, vec3_sub(g.camera.position, trail[i]));
+		float new_side_len = vec3_len(new_side);
+		if (new_side_len > 0.001 && vec3_len(dir) > 1.0) {
+			side = vec3_mulf(new_side, 1.0 / new_side_len);
+		}
+		else if (!has_prev) {
+			continue;
+		}
+
+		float t = (float)i / (float)(SHIP_EXHAUST_TRAIL_POINTS - 1);
+		// Fade in over the first few points, so the trail doesn't start as a 
+		// hard edge right at the nozzle
+		float fade = (1.0 - t) * (1.0 - t) * min(1.0, i / 3.0);
+		float width = 14.0 + 34.0 * (1.0 - t);
+
+		vec3_t pos[3] = {
+			vec3_sub(trail[i], vec3_mulf(side, width)),
+			trail[i],
+			vec3_add(trail[i], vec3_mulf(side, width))
+		};
+		rgba_t color[3] = {exhaust_trail_color, exhaust_trail_color, exhaust_trail_color};
+		color[0].a = 0;
+		color[1].a = 255 * fade * intensity;
+		color[2].a = 0;
+
+		if (has_prev) {
+			for (int j = 0; j < 2; j++) {
+				render_push_tris((tris_t) {
+					.vertices = {
+						{.pos = prev_pos[j],   .color = prev_color[j]},
+						{.pos = prev_pos[j+1], .color = prev_color[j+1]},
+						{.pos = pos[j],        .color = color[j]},
+					}
+				}, RENDER_NO_TEXTURE);
+				render_push_tris((tris_t) {
+					.vertices = {
+						{.pos = pos[j],        .color = color[j]},
+						{.pos = prev_pos[j+1], .color = prev_color[j+1]},
+						{.pos = pos[j+1],      .color = color[j+1]},
+					}
+				}, RENDER_NO_TEXTURE);
+			}
+		}
+
+		for (int j = 0; j < 3; j++) {
+			prev_pos[j] = pos[j];
+			prev_color[j] = color[j];
+		}
+		has_prev = true;
+	}
+}
+
+// Draws the additive trail and flare for each engine. Expects an identity
+// model mat, RENDER_BLEND_LIGHTER and depth writes to be disabled.
+void ship_draw_exhaust_glow(ship_t *self) {
+	if (!self->exhaust_trail_valid) {
+		return;
+	}
+
+	int engines = 0;
+	for (int i = 0; i < 3; i++) {
+		if (self->exhaust_plume[i].v) {
+			engines++;
+		}
+	}
+	if (engines == 0) {
+		return;
+	}
+
+	// The flare follows the exhaust plume, both in size and position
+	float base_size = clamp(110.0 + self->exhaust_len * 0.8, 110.0, 260.0);
+	if (engines > 1) {
+		base_size *= 0.8;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		if (!self->exhaust_plume[i].v) {
+			continue;
+		}
+		vec3_t *trail = self->exhaust_plume[i].trail;
+		ship_draw_exhaust_trail(self, trail);
+
+		// The flare sits inside the plume, close to the nozzle. Some ships have
+		// their nozzle recessed into the hull, so pull the flare a bit towards
+		// the camera to not have it cut off by the surrounding hull polygons.
+		vec3_t nozzle = vec3_lerp(self->exhaust_plume[i].base, self->exhaust_plume[i].initial, 0.35);
+		vec3_t flare_pos = vec3_transform(nozzle, &self->mat);
+		vec3_t to_camera = vec3_sub(g.camera.position, flare_pos);
+		float to_camera_len = vec3_len(to_camera);
+		if (to_camera_len > 1.0) {
+			float pull = min(64.0, to_camera_len * 0.5);
+			flare_pos = vec3_add(flare_pos, vec3_mulf(to_camera, pull / to_camera_len));
+		}
+
+		int size = base_size * rand_float(0.85, 1.15);
+		int core_size = size * 0.4;
+		render_push_sprite(flare_pos, vec2i(size, size), exhaust_flare_color, exhaust_flare_texture);
+		render_push_sprite(flare_pos, vec2i(core_size, core_size), exhaust_flare_core_color, exhaust_flare_texture);
+	}
+}
+
+static void ship_update_exhaust_trail(ship_t *self) {
+	float target = 1.0;
+	if (self->pilot == g.pilot && self->thrust_max > 0) {
+		target = clamp(self->thrust_mag / self->thrust_max, 0.0, 1.0);
+	}
+	self->exhaust_intensity += (target - self->exhaust_intensity) * min(1.0, system_tick() * 8.0);
+
+	self->exhaust_trail_timer -= system_tick();
+	bool shift = self->exhaust_trail_timer <= 0;
+	if (shift) {
+		self->exhaust_trail_timer = SHIP_EXHAUST_TRAIL_INTERVAL;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		if (!self->exhaust_plume[i].v) {
+			continue;
+		}
+
+		vec3_t *trail = self->exhaust_plume[i].trail;
+		vec3_t head = vec3_transform(self->exhaust_plume[i].initial, &self->mat);
+
+		// Start over if we have no trail yet or the ship was teleported
+		if (!self->exhaust_trail_valid || vec3_len(vec3_sub(head, trail[0])) > 4096) {
+			for (int j = 0; j < SHIP_EXHAUST_TRAIL_POINTS; j++) {
+				trail[j] = head;
+			}
+		}
+		else if (shift) {
+			for (int j = SHIP_EXHAUST_TRAIL_POINTS - 1; j > 0; j--) {
+				trail[j] = trail[j - 1];
+			}
+		}
+		trail[0] = head;
+	}
+	self->exhaust_trail_valid = true;
 }
 
 void ship_draw_shadow(ship_t *self) {	
@@ -468,6 +766,7 @@ void ship_update(ship_t *self) {
 	}
 
 	for (int i = 0; i < 3; i++) {
+		self->exhaust_len = exhaust_len;
 		if (self->exhaust_plume[i].v) {
 			vec3_t jitter = vec3_rand(7);
 			jitter.z *= 4;
@@ -478,6 +777,8 @@ void ship_update(ship_t *self) {
 
 	mat4_set_translation(&self->mat, self->position);
 	mat4_set_yaw_pitch_roll(&self->mat, self->angle);
+
+	ship_update_exhaust_trail(self);
 
 
 

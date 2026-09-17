@@ -297,10 +297,31 @@ static void toggle_res(menu_t *menu, int data) {
 	save.is_dirty = true;
 }
 
-static void toggle_post(menu_t *menu, int data) {
-	render_set_post_effect(data);
-	save.post_effect = data;
+static void toggle_post_flag(int flag, int enabled) {
+	if (enabled) {
+		save.post_effect |= flag;
+	}
+	else {
+		save.post_effect &= ~flag;
+	}
+	render_set_post_effect(save.post_effect);
 	save.is_dirty = true;
+}
+
+static void toggle_post_crt(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_CRT, data);
+}
+
+static void toggle_post_bloom(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_BLOOM, data);
+}
+
+static void toggle_post_motion_blur(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_MOTION_BLUR, data);
+}
+
+static void toggle_post_lighting(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_LIGHTING, data);
 }
 
 static void toggle_screen_shake(menu_t *menu, int data) {
@@ -313,7 +334,6 @@ static const char *opts_roll[] = {"0", "10", "20", "30", "40", "50", "60", "70",
 static const char *opts_ui_sizes[] = {"AUTO", "1X", "2X", "3X", "4X"};
 static const char *opts_draw_stats[] = {"OFF", "FPS", "DEBUG"};
 static const char *opts_res[] = {"NATIVE", "240P", "480P"};
-static const char *opts_post[] = {"NONE", "CRT EFFECT"};
 static const char *opts_screen_shake[] = {"DISABLED", "REDUCED", "FULL"};
 
 static void page_options_video_init(menu_t *menu) {
@@ -333,7 +353,10 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, save.ui_scale, "UI SCALE", opts_ui_sizes, len(opts_ui_sizes), toggle_ui_scale);
 	menu_page_add_toggle(page, save.draw_stats, "DRAW STATS", opts_draw_stats, len(opts_draw_stats), toggle_draw_stats);
 	menu_page_add_toggle(page, save.screen_res, "SCREEN RESOLUTION", opts_res, len(opts_res), toggle_res);
-	menu_page_add_toggle(page, save.post_effect, "POST PROCESSING", opts_post, len(opts_post), toggle_post);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_CRT) ? 1 : 0, "CRT EFFECT", opts_off_on, len(opts_off_on), toggle_post_crt);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM) ? 1 : 0, "BLOOM", opts_off_on, len(opts_off_on), toggle_post_bloom);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
 }
 
 // -----------------------------------------------------------------------------

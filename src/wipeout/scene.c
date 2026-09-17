@@ -138,12 +138,14 @@ void scene_update(void) {
 
 void scene_draw(camera_t *camera) {
 	// Sky
+	render_set_material(RENDER_MATERIAL_UNLIT);
 	render_set_depth_write(false);
 	mat4_set_translation(&sky_object->mat, vec3_add(camera->position, sky_offset));
 	object_draw(sky_object, &sky_object->mat);
 	render_set_depth_write(true);
 
 	// Objects
+	render_set_material(RENDER_MATERIAL_SCENE);
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.

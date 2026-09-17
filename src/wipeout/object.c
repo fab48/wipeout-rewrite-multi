@@ -439,6 +439,13 @@ Object *objects_load(char *name, texture_list_t tl) {
 
 
 void object_draw(Object *object, mat4_t *mat) {
+	object_draw_filtered(object, mat, 0, false);
+}
+
+// Draws only the primitives that have (with_flag == true) or don't have
+// (with_flag == false) any of the flags in flag_mask. A flag_mask of 0 draws
+// everything.
+void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool with_flag) {
 	vec3_t *vertex = object->vertices;
 
 	Prm poly = {.primitive = object->primitives};
@@ -453,6 +460,24 @@ void object_draw(Object *object, mat4_t *mat) {
 		int coord1;
 		int coord2;
 		int coord3;
+
+		if (flag_mask && (flags_any(poly.primitive->flag, flag_mask) != 0) != with_flag) {
+			switch (poly.primitive->type) {
+			case PRM_TYPE_F3: poly.f3++; break;
+			case PRM_TYPE_F4: poly.f4++; break;
+			case PRM_TYPE_FT3: poly.ft3++; break;
+			case PRM_TYPE_FT4: poly.ft4++; break;
+			case PRM_TYPE_G3: poly.g3++; break;
+			case PRM_TYPE_G4: poly.g4++; break;
+			case PRM_TYPE_GT3: poly.gt3++; break;
+			case PRM_TYPE_GT4: poly.gt4++; break;
+			case PRM_TYPE_TSPR:
+			case PRM_TYPE_BSPR: poly.spr++; break;
+			default: break;
+			}
+			continue;
+		}
+
 		switch (poly.primitive->type) {
 		case PRM_TYPE_GT3:
 			coord0 = poly.gt3->coords[0];

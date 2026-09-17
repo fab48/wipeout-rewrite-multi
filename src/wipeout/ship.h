@@ -11,6 +11,9 @@
 #define SHIP_DIRECTION_FORWARD	(1<< 3)
 #define SHIP_FLYING				(1<< 4)
 #define SHIP_LEFT_SIDE			(1<< 5)
+#define SHIP_EXHAUST_TRAIL_POINTS    12
+#define SHIP_EXHAUST_TRAIL_INTERVAL  (1.0/40.0)
+
 #define SHIP_RACING				(1<< 6)
 #define SHIP_COLL				(1<< 7)
 #define SHIP_ON_JUNCTION		(1<< 8)
@@ -129,7 +132,13 @@ typedef struct ship_t {
 	struct {
 		vec3_t *v;
 		vec3_t initial;
+		vec3_t base;
+		vec3_t trail[SHIP_EXHAUST_TRAIL_POINTS];
 	} exhaust_plume[3];
+	float exhaust_intensity;
+	float exhaust_len;
+	float exhaust_trail_timer;
+	bool exhaust_trail_valid;
 
 	// Control Routines
 	vec3_t (*update_strat_func)(struct ship_t *, track_face_t *);
@@ -152,6 +161,8 @@ void ship_init(ship_t *self, section_t *section, int pilot, int position);
 void ship_init_exhaust_plume(ship_t *self);
 void ship_reset_exhaust_plume(ship_t *self);
 void ship_draw(ship_t *self);
+void ship_draw_exhaust_plume(ship_t *self);
+void ship_draw_exhaust_glow(ship_t *self);
 void ship_draw_shadow(ship_t *self);
 void ship_update(ship_t *self);
 void ship_collide_with_track(ship_t *self, track_face_t *face);

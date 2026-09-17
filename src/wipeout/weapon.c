@@ -211,6 +211,57 @@ void weapons_update(void) {
 	}
 }
 
+static rgba_t weapon_shield_vertex_color(weapon_t *self, mat4_t *mat, vec3_t vertex) {
+	// Fresnel like rim: bright where the bubble's surface is seen at a grazing
+	// angle, nearly invisible where we look straight through it
+	vec3_t world = vec3_transform(vertex, mat);
+	vec3_t normal = vec3_sub(world, self->position);
+	vec3_t view = vec3_sub(g.camera.position, world);
+	float len = vec3_len(normal) * vec3_len(view);
+	float facing = len > 0.001 ? fabsf(vec3_dot(normal, view) / len) : 1.0;
+	float rim = 1.0 - clamp(facing, 0.0, 1.0);
+	rim = rim * rim;
+
+	// Energy waves, running over the bubble from front to back
+	float wave = sinf(self->timer * 9.0 + vertex.z * 0.012 + vertex.y * 0.02) * 0.5 + 0.5;
+	wave = wave * wave;
+
+	// Flicker when the shield is about to run out
+	float flicker = self->timer < 1.0 ? (sinf(self->timer * 40.0) * 0.5 + 0.5) : 1.0;
+
+	float alpha = (14.0 + rim * 170.0 + wave * (20.0 + rim * 60.0)) * flicker;
+	return rgba(
+		24 + wave * 72,
+		72 + wave * 56,
+		220,
+		clamp(alpha, 0.0, 255.0)
+	);
+}
+
+static void weapon_shield_set_colors(weapon_t *self, mat4_t *mat) {
+	Prm poly = {.primitive = self->model->primitives};
+	int primitives_len = self->model->primitives_len;
+	vec3_t *vertices = self->model->vertices;
+
+	for (int k = 0; k < primitives_len; k++) {
+		switch (poly.primitive->type) {
+		case PRM_TYPE_G3:
+			for (int v = 0; v < 3; v++) {
+				poly.g3->color[v] = weapon_shield_vertex_color(self, mat, vertices[poly.g3->coords[v]]);
+			}
+			poly.g3 += 1;
+			break;
+
+		case PRM_TYPE_G4:
+			for (int v = 0; v < 4; v++) {
+				poly.g4->color[v] = weapon_shield_vertex_color(self, mat, vertices[poly.g4->coords[v]]);
+			}
+			poly.g4 += 1;
+			break;
+		}
+	}
+}
+
 void weapons_draw(void) {
 	mat4_t mat = mat4_identity();
 	for (int i = 0; i < weapons_active; i++) {
@@ -220,6 +271,20 @@ void weapons_draw(void) {
 			mat4_set_yaw_pitch_roll(&mat, weapon->angle);
 			if (weapon->model == weapon_assets.mine) {
 				weapon_update_mine_lights(weapon, i);
+			}
+
+			if (weapon->update_func == weapon_update_shield) {
+				// Energy bubble: additive, double sided and without writing to the
+				// depth buffer, so that it never hides anything
+				weapon_shield_set_colors(weapon, &mat);
+				render_set_blend_mode(RENDER_BLEND_LIGHTER);
+				render_set_depth_write(false);
+				render_set_cull_backface(false);
+				object_draw(weapon->model, &mat);
+				render_set_cull_backface(true);
+				render_set_depth_write(true);
+				render_set_blend_mode(RENDER_BLEND_NORMAL);
+				continue;
 			}
 			object_draw(weapon->model, &mat);
 		}
@@ -559,35 +624,7 @@ void weapon_update_shield(weapon_t *self) {
 	}
 	self->angle = self->owner->angle;
 
-	// Animated colors.
-	Prm poly = {.primitive = self->model->primitives};
-	int primitives_len = self->model->primitives_len;
-	uint8_t col;
-	int16_t *coords;
-	const uint8_t shield_alpha = 48;
-
-	float color_timer = self->timer * 0.05;
-	for (int k = 0; k < primitives_len; k++) {
-		switch (poly.primitive->type) {
-		case PRM_TYPE_G3 :
-			coords = poly.g3->coords;
-			for (int v = 0; v < 3; v++) {
-				col = sinf(color_timer * coords[v]) * 127 + 128;
-				poly.g3->color[v] = rgba(col, col, 255, shield_alpha);
-			}
-			poly.g3 += 1;
-			break;
-
-		case PRM_TYPE_G4 :
-			coords = poly.g4->coords;
-			for (int v = 0; v < 4; v++) {
-				col = sinf(color_timer * coords[v]) * 127 + 128;
-				poly.g4->color[v] = rgba(col, col, 255, shield_alpha);
-			}
-			poly.g4 += 1;
-			break;
-		}
-	}
+	// The colors are set in weapons_draw(), as they depend on the camera
 }
 
 

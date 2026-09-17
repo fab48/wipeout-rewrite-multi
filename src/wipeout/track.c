@@ -283,8 +283,9 @@ void track_draw_section(section_t *section) {
 	}
 }
 
-void track_draw(camera_t *camera) {	
+void track_draw(camera_t *camera) {
 	render_set_model_mat(&mat4_identity());
+	render_set_material(RENDER_MATERIAL_TRACK);
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.

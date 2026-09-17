@@ -15,10 +15,24 @@ typedef enum {
 } render_resolution_t;
 
 typedef enum {
-	RENDER_POST_NONE,
-	RENDER_POST_CRT,
-	NUM_RENDER_POST_EFFECTS,
+	// These are flags and can be combined
+	RENDER_POST_NONE = 0,
+	RENDER_POST_CRT = (1<<0),
+	RENDER_POST_BLOOM = (1<<1),
+	RENDER_POST_MOTION_BLUR = (1<<2),
+	RENDER_POST_LIGHTING = (1<<3),
 } render_post_effect_t;
+
+// Materials for the (approximated) PBR lighting. Anything drawn with
+// RENDER_BLEND_LIGHTER is always unlit.
+typedef enum {
+	RENDER_MATERIAL_UNLIT,
+	RENDER_MATERIAL_DEFAULT,
+	RENDER_MATERIAL_TRACK,
+	RENDER_MATERIAL_SCENE,
+	RENDER_MATERIAL_SHIP,
+	NUM_RENDER_MATERIALS,
+} render_material_t;
 
 typedef struct {
 	uint32_t num_tris;
@@ -42,6 +56,11 @@ vec2i_t render_size(void);
 
 void render_frame_prepare(void);
 void render_frame_end(void);
+
+// Applies the scene post effects (motion blur, bloom) to everything drawn so
+// far in this frame. Call this after the 3d scene, but before drawing the HUD.
+// motion_blur is 0..1
+void render_scene_post(float motion_blur);
 // render_stats_t owned by the renderer
 const render_stats_t* render_frame_get_stats(void);
 
@@ -53,6 +72,7 @@ void render_set_depth_test(bool enabled);
 void render_set_depth_offset(float offset);
 void render_set_screen_position(vec2_t pos);
 void render_set_blend_mode(render_blend_mode_t mode);
+void render_set_material(render_material_t material);
 void render_set_cull_backface(bool enabled);
 
 vec3_t render_transform(vec3_t pos);

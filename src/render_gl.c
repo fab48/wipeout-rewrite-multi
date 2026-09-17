@@ -115,6 +115,15 @@ static GLuint create_program(const char *vs_source, const char *fs_source) {
 
 
 
+#if defined(__EMSCRIPTEN__) || defined(USE_GLES2)
+	// The lighting needs dFdx()/dFdy() for the face normals
+	#define SHADER_SOURCE_DERIVATIVES(...) \
+		"#extension GL_OES_standard_derivatives : enable\n" \
+		"precision highp float;" #__VA_ARGS__
+#else
+	#define SHADER_SOURCE_DERIVATIVES(...) #__VA_ARGS__
+#endif
+
 // -----------------------------------------------------------------------------
 // Main game shaders
 
@@ -125,6 +134,9 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 
 	varying vec4 v_color;
 	varying vec2 v_uv;
+	varying vec3 v_pos;
+	varying vec3 v_light;
+	varying vec3 v_up;
 	uniform mat4 view;
 	uniform mat4 model;
 	uniform mat4 projection;
@@ -134,7 +146,20 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	uniform float time;
 	
 	void main(void) {
-		gl_Position = projection * view * model * vec4(pos, 1.0);
+		// Everything for the lighting is in view space. -Y is up.
+		vec4 view_pos = view * model * vec4(pos, 1.0);
+		v_pos = view_pos.xyz;
+		v_up = (view * vec4(0.0, -1.0, 0.0, 0.0)).xyz;
+
+		// The light mostly follows the camera: it sits ahead of us, a bit to
+		// the side and above the horizon, so that we always get to see its 
+		// reflection on the track and the ships. A fixed world space sun is 
+		// mixed in, to have the lighting still change when we turn.
+		vec3 sun = (view * vec4(0.50, -0.58, 0.64, 0.0)).xyz;
+		vec3 follow = normalize(vec3(0.22, 0.0, -1.0) + v_up * 0.55);
+		v_light = mix(sun, follow, 0.75);
+
+		gl_Position = projection * view_pos;
 		gl_Position.xy += screen.xy * gl_Position.w;
 		v_color = color;
 		v_color.a *= smoothstep(
@@ -145,18 +170,114 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	}
 );
 
-static const char * const SHADER_GAME_FS = SHADER_SOURCE(
+static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec4 v_color;
 	varying vec2 v_uv;
+	varying vec3 v_pos;
+	varying vec3 v_light;
+	varying vec3 v_up;
 	uniform sampler2D texture;
+	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 
 	void main(void) {
+		// Flat face normal from the view space position
+		vec3 face = cross(dFdx(v_pos), dFdy(v_pos));
+
 		vec4 tex_color = texture2D(texture, v_uv);
 		vec4 color = tex_color * v_color;
 		if (color.a == 0.0) {
 			discard;
 		}
 		color.rgb = color.rgb * 2.0;
+
+		if (material.w > 0.5 && dot(face, face) > 0.0) {
+			vec3 albedo = color.rgb;
+			float metallic = material.x;
+			float smoothness = material.y;
+
+			vec3 n = normalize(face);
+			vec3 v = normalize(-v_pos);
+			if (dot(n, v) < 0.0) {
+				n = -n;
+			}
+
+			// The track is made of many small, nearly coplanar faces. With flat
+			// normals each of them would get its own highlight; pull the normals
+			// of everything that's roughly facing up towards the world up 
+			// vector, so that the reflection runs smoothly over the polygons.
+			float gloss = 1.0;
+			if (material.w > 1.5) {
+				vec3 up_n = normalize(v_up);
+				float flatten = smoothstep(0.5, 0.9, dot(n, up_n));
+				n = normalize(mix(n, up_n, flatten * 0.94));
+
+				// Fade the reflections on the road surface out with distance;
+				// they look odd when seen from far away or high up
+				float dist_fade = 1.0 - smoothstep(5000.0, 16000.0, length(v_pos));
+				gloss = mix(1.0, dist_fade, flatten);
+			}
+
+			// The track: the albedo drives the material, too. Grey-blue 
+			// surfaces are smooth metal, saturated colors are glossy paint and
+			// everything else (neutral greys, browns) is rather dull.
+			if (material.w > 1.5) {
+				float t_max = max(albedo.r, max(albedo.g, albedo.b));
+				float t_min = min(albedo.r, min(albedo.g, albedo.b));
+				float t_saturation = (t_max - t_min) / max(t_max, 0.001);
+				float paint = smoothstep(0.35, 0.7, t_saturation);
+				float blue_metal = smoothstep(0.01, 0.10, albedo.b - (albedo.r + albedo.g) * 0.5) * (1.0 - paint);
+
+				metallic = 0.8 * blue_metal;
+				smoothness = mix(0.25, smoothness, max(blue_metal, paint));
+			}
+
+			// Metallic objects (the ships): the albedo drives the material. 
+			// Black parts are matte, vivid colors are glossy paint (less 
+			// metallic) and everything else is bare metal.
+			else if (metallic > 0.5) {
+				float c_max = max(albedo.r, max(albedo.g, albedo.b));
+				float c_min = min(albedo.r, min(albedo.g, albedo.b));
+				float saturation = (c_max - c_min) / max(c_max, 0.001);
+				smoothness *= smoothstep(0.04, 0.4, c_max);
+				metallic *= 1.0 - 0.6 * saturation;
+			}
+			vec3 l = normalize(v_light);
+			vec3 h = normalize(l + v);
+			float ndl = max(dot(n, l), 0.0);
+			float ndv = max(dot(n, v), 0.001);
+			float ndh = max(dot(n, h), 0.0);
+			float vdh = max(dot(v, h), 0.0);
+
+			vec3 sun = vec3(1.0, 0.93, 0.82);
+			vec3 f0 = mix(vec3(0.04), albedo * 0.6 + 0.22, metallic);
+
+			// Diffuse. The textures have their lighting baked in already, so
+			// keep the ambient term high.
+			vec3 diffuse = albedo * (0.66 + 0.5 * ndl * sun) * (1.0 - metallic * 0.45);
+
+			// GGX specular, without the geometry term
+			float roughness = clamp(1.0 - smoothness, 0.08, 1.0);
+			float a = roughness * roughness;
+			float a2 = a * a;
+			float d = ndh * ndh * (a2 - 1.0) + 1.0;
+			float ggx = min(a2 / (3.14159 * d * d), 24.0);
+			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
+			vec3 specular = fresnel * ggx * 0.25 * ndl * sun;
+
+			// Fake environment reflection: a sky/ground gradient
+			vec3 r = reflect(-v, n);
+			float up = dot(r, normalize(v_up));
+			vec3 env = mix(vec3(0.05, 0.05, 0.07), vec3(0.30, 0.38, 0.58), smoothstep(-0.1, 0.8, up));
+			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
+			vec3 reflection = env * env_fresnel * smoothness * (0.5 + metallic * 0.6);
+
+			vec3 lit = diffuse + (specular + reflection) * gloss;
+
+			// Overbright texels (signs, lights, markers) are emissive
+			float brightness = max(tex_color.r, max(tex_color.g, tex_color.b));
+			float emissive = smoothstep(0.72, 1.0, brightness) * material.z;
+			color.rgb = mix(lit, albedo * 1.3, emissive);
+		}
 		gl_FragColor = color;
 	}
 );
@@ -172,6 +293,7 @@ typedef struct {
 		GLuint camera_pos;
 		GLuint fade;
 		GLuint time;
+		GLuint material;
 	} uniform;
 	struct {
 		GLuint pos;
@@ -191,6 +313,7 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.screen = glGetUniformLocation(s->program, "screen");
 	s->uniform.camera_pos = glGetUniformLocation(s->program, "camera_pos");
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
+	s->uniform.material = glGetUniformLocation(s->program, "material");
 
 	s->attribute.pos = glGetAttribLocation(s->program, "pos");
 	s->attribute.uv = glGetAttribLocation(s->program, "uv");
@@ -237,7 +360,89 @@ static const char * const SHADER_POST_FS_DEFAULT = SHADER_SOURCE(
 	uniform vec2 screen_size;
 
 	void main(void) {
+		// The backbuffer's alpha channel holds the bloom mask; don't let it
+		// leak into the final image
+		gl_FragColor = vec4(texture2D(texture, v_uv).rgb, 1.0);
+	}
+);
+
+// Bloom: everything drawn with RENDER_BLEND_LIGHTER accumulates its alpha in
+// the backbuffer's alpha channel. We use this as a mask, so that only the
+// additive effects (exhausts, flares, particles, weapons) glow.
+static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
+	varying vec2 v_uv;
+
+	uniform sampler2D texture;
+	uniform vec2 param; // downsample tap offset
+	uniform float param_bright; // amount of overbright pixels to let through
+
+	void main(void) {
+		vec4 color = (
+			texture2D(texture, v_uv + param * vec2(-1.0, -1.0)) +
+			texture2D(texture, v_uv + param * vec2( 1.0, -1.0)) +
+			texture2D(texture, v_uv + param * vec2(-1.0,  1.0)) +
+			texture2D(texture, v_uv + param * vec2( 1.0,  1.0))
+		) * 0.25;
+		float brightness = max(color.r, max(color.g, color.b));
+		float bright_pass = smoothstep(0.82, 1.0, brightness) * param_bright;
+		gl_FragColor = vec4(color.rgb * min(color.a + bright_pass, 1.0), 1.0);
+	}
+);
+
+// 9 tap gaussian, using 5 bilinear fetches
+static const char * const SHADER_POST_FS_BLOOM_BLUR = SHADER_SOURCE(
+	varying vec2 v_uv;
+
+	uniform sampler2D texture;
+	uniform vec2 param; // blur direction, in texels
+
+	void main(void) {
+		vec3 color = texture2D(texture, v_uv).rgb * 0.2270270;
+		color += texture2D(texture, v_uv + param * 1.3846154).rgb * 0.3162162;
+		color += texture2D(texture, v_uv - param * 1.3846154).rgb * 0.3162162;
+		color += texture2D(texture, v_uv + param * 3.2307692).rgb * 0.0702703;
+		color += texture2D(texture, v_uv - param * 3.2307692).rgb * 0.0702703;
+		gl_FragColor = vec4(color, 1.0);
+	}
+);
+
+// Radial motion blur; leaves the center of the screen sharp and smears the
+// borders outwards. Blurs the alpha channel (the bloom mask) along with it.
+static const char * const SHADER_POST_FS_MOTION_BLUR = SHADER_SOURCE(
+	varying vec2 v_uv;
+
+	uniform sampler2D texture;
+	uniform vec2 param; // x = strength
+
+	void main(void) {
+		vec2 dir = v_uv - vec2(0.5, 0.5);
+		float mag = param.x * smoothstep(0.08, 0.7, length(dir));
+		vec4 color = vec4(0.0);
+		for (int i = 0; i < 10; i++) {
+			color += texture2D(texture, v_uv - dir * mag * (float(i) / 10.0));
+		}
+		gl_FragColor = color / 10.0;
+	}
+);
+
+static const char * const SHADER_POST_FS_COPY = SHADER_SOURCE(
+	varying vec2 v_uv;
+
+	uniform sampler2D texture;
+
+	void main(void) {
 		gl_FragColor = texture2D(texture, v_uv);
+	}
+);
+
+static const char * const SHADER_POST_FS_BLOOM_COMPOSITE = SHADER_SOURCE(
+	varying vec2 v_uv;
+
+	uniform sampler2D texture;
+	uniform vec2 param; // x = intensity
+
+	void main(void) {
+		gl_FragColor = vec4(texture2D(texture, v_uv).rgb * param.x, 1.0);
 	}
 );
 
@@ -303,6 +508,8 @@ typedef struct {
 		GLuint projection;
 		GLuint screen_size;
 		GLuint time;
+		GLuint param;
+		GLuint param_bright;
 	} uniform;
 	struct {
 		GLuint pos;
@@ -314,6 +521,8 @@ void shader_post_general_init(prg_post_t *s) {
 	s->uniform.projection = glGetUniformLocation(s->program, "projection");
 	s->uniform.screen_size = glGetUniformLocation(s->program, "screen_size");
 	s->uniform.time = glGetUniformLocation(s->program, "time");
+	s->uniform.param = glGetUniformLocation(s->program, "param");
+	s->uniform.param_bright = glGetUniformLocation(s->program, "param_bright");
 
 	s->attribute.pos = glGetAttribLocation(s->program, "pos");
 	s->attribute.uv = glGetAttribLocation(s->program, "uv");
@@ -331,6 +540,13 @@ void shader_post_general_init(prg_post_t *s) {
 prg_post_t *shader_post_default_init(void) {
 	prg_post_t *s = mem_bump(sizeof(prg_post_t));
 	s->program = create_program(SHADER_POST_VS, SHADER_POST_FS_DEFAULT);	
+	shader_post_general_init(s);
+	return s;
+}
+
+prg_post_t *shader_post_custom_init(const char *fs_source) {
+	prg_post_t *s = mem_bump(sizeof(prg_post_t));
+	s->program = create_program(SHADER_POST_VS, fs_source);
 	shader_post_general_init(s);
 	return s;
 }
@@ -374,9 +590,44 @@ static GLuint backbuffer = 0;
 static GLuint backbuffer_texture = 0;
 static GLuint backbuffer_depth_buffer = 0;
 
+#define BLOOM_TARGET_HEIGHT 256
+#define BLOOM_BLUR_PASSES 3
+#define BLOOM_INTENSITY 0.6
+#define BLOOM_BRIGHT_PASS 0.55
+
+#define MOTION_BLUR_STRENGTH 0.16
+
+static bool lighting_enabled = false;
+static render_material_t material = RENDER_MATERIAL_UNLIT;
+
+// metallic, smoothness, emissive
+static const float material_params[NUM_RENDER_MATERIALS][3] = {
+	[RENDER_MATERIAL_UNLIT]   = {0.0, 0.0, 0.0},
+	[RENDER_MATERIAL_DEFAULT] = {0.0, 0.3, 0.5},
+	[RENDER_MATERIAL_TRACK]   = {0.0, 0.6, 0.6},
+	[RENDER_MATERIAL_SCENE]   = {0.0, 0.3, 1.0},
+	[RENDER_MATERIAL_SHIP]    = {0.9, 0.86, 0.7},
+};
+
+static bool motion_blur_enabled = false;
+static GLuint scratch_fbo = 0;
+static GLuint scratch_texture = 0;
+
+static bool bloom_enabled = false;
+static vec2i_t bloom_size;
+static int bloom_downsample = 1;
+static GLuint bloom_fbo[2] = {0, 0};
+static GLuint bloom_texture[2] = {0, 0};
+
 prg_game_t *prg_game;
 prg_post_t *prg_post;
-prg_post_t *prg_post_effects[NUM_RENDER_POST_EFFECTS] = {};
+prg_post_t *prg_post_default;
+prg_post_t *prg_post_crt;
+prg_post_t *prg_motion_blur;
+prg_post_t *prg_copy;
+prg_post_t *prg_bloom_extract;
+prg_post_t *prg_bloom_blur;
+prg_post_t *prg_bloom_composite;
 
 // Intra-frame counts
 static render_stats_t running_stats = {0};
@@ -385,6 +636,8 @@ static render_stats_t end_stats = {0};
 
 
 static void render_flush(void);
+static void render_apply_blend_mode(void);
+static void render_apply_material(void);
 
 
 // static void gl_message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam) {
@@ -433,8 +686,13 @@ void render_init(vec2i_t screen_size) {
 
 	// Post Shaders
 
-	prg_post_effects[RENDER_POST_NONE] = shader_post_default_init();
-	prg_post_effects[RENDER_POST_CRT] = shader_post_crt_init();
+	prg_post_default = shader_post_default_init();
+	prg_post_crt = shader_post_crt_init();
+	prg_motion_blur = shader_post_custom_init(SHADER_POST_FS_MOTION_BLUR);
+	prg_copy = shader_post_custom_init(SHADER_POST_FS_COPY);
+	prg_bloom_extract = shader_post_custom_init(SHADER_POST_FS_BLOOM_EXTRACT);
+	prg_bloom_blur = shader_post_custom_init(SHADER_POST_FS_BLOOM_BLUR);
+	prg_bloom_composite = shader_post_custom_init(SHADER_POST_FS_BLOOM_COMPOSITE);
 	render_set_post_effect(RENDER_POST_NONE);
 
 	// Game shader
@@ -447,7 +705,7 @@ void render_init(vec2i_t screen_size) {
 
 	glEnable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	render_apply_blend_mode();
 
 
 	// Create white texture
@@ -539,7 +797,7 @@ void render_set_resolution(render_resolution_t res) {
 	}
 	
 	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, backbuffer_size.x, backbuffer_size.y, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, backbuffer_size.x, backbuffer_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -552,6 +810,49 @@ void render_set_resolution(render_resolution_t res) {
 	
 	glBindRenderbuffer(GL_RENDERBUFFER, backbuffer_depth_buffer);
 	glRenderbufferStorage(GL_RENDERBUFFER, RENDER_DEPTH_BUFFER_INTERNAL_FORMAT, backbuffer_size.x, backbuffer_size.y);
+
+
+	// Bloom buffers; always roughly BLOOM_TARGET_HEIGHT pixels high, so that
+	// the glow has the same apparent size for all resolutions
+
+	bloom_downsample = clamp((backbuffer_size.y + BLOOM_TARGET_HEIGHT / 2) / BLOOM_TARGET_HEIGHT, 1, 16);
+	bloom_size = vec2i(
+		max(1, backbuffer_size.x / bloom_downsample),
+		max(1, backbuffer_size.y / bloom_downsample)
+	);
+
+	// Full size scratch buffer for the motion blur
+
+	if (!scratch_fbo) {
+		glGenTextures(1, &scratch_texture);
+		glGenFramebuffers(1, &scratch_fbo);
+	}
+	glBindTexture(GL_TEXTURE_2D, scratch_texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, backbuffer_size.x, backbuffer_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindFramebuffer(GL_FRAMEBUFFER, scratch_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, scratch_texture, 0);
+
+	if (!bloom_fbo[0]) {
+		glGenTextures(2, bloom_texture);
+		glGenFramebuffers(2, bloom_fbo);
+	}
+
+	for (int i = 0; i < 2; i++) {
+		glBindTexture(GL_TEXTURE_2D, bloom_texture[i]);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, bloom_size.x, bloom_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, bloom_fbo[i]);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, bloom_texture[i], 0);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
 
 	projection_mat_2d = render_setup_2d_projection_mat(backbuffer_size);
 	projection_mat_3d = render_setup_3d_projection_mat(backbuffer_size);
@@ -569,8 +870,13 @@ void render_set_resolution(render_resolution_t res) {
 }
 
 void render_set_post_effect(render_post_effect_t post) {
-	error_if(post < 0 || post > NUM_RENDER_POST_EFFECTS, "Invalid post effect %d", post);
-	prg_post = prg_post_effects[post];
+	prg_post = (post & RENDER_POST_CRT) ? prg_post_crt : prg_post_default;
+	bloom_enabled = (post & RENDER_POST_BLOOM);
+	motion_blur_enabled = (post & RENDER_POST_MOTION_BLUR);
+
+	render_flush();
+	lighting_enabled = (post & RENDER_POST_LIGHTING);
+	render_apply_material();
 }
 
 vec2i_t render_size(void) {
@@ -587,12 +893,122 @@ void render_frame_prepare(void) {
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(true);
 	glDisable(GL_POLYGON_OFFSET_FILL);
-	glClearColor(0, 0, 0, 1);
+	glClearColor(0, 0, 0, 0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glEnable(GL_DEPTH_TEST); 
 
 	running_stats.num_tris = 0;
 	running_stats.num_draw_calls = 0;
+}
+
+static void render_post_pass(prg_post_t *prg, GLuint target_fbo, vec2i_t target_size, GLuint source_texture, vec2_t param) {
+	static mat4_t projection_mat_unit;
+	projection_mat_unit = render_setup_2d_projection_mat(vec2i(1, 1));
+
+	use_program(prg);
+	glBindFramebuffer(GL_FRAMEBUFFER, target_fbo);
+	glViewport(0, 0, target_size.x, target_size.y);
+	glBindTexture(GL_TEXTURE_2D, source_texture);
+	glUniformMatrix4fv(prg->uniform.projection, 1, false, projection_mat_unit.m);
+	glUniform2f(prg->uniform.param, param.x, param.y);
+
+	rgba_t white = rgba(128,128,128,255);
+	tris_buffer[tris_len++] = (tris_t){
+		.vertices = {
+			{.pos = {0, 1, 0}, .uv = {0, 0}, .color = white},
+			{.pos = {1, 0, 0}, .uv = {1, 1}, .color = white},
+			{.pos = {0, 0, 0}, .uv = {0, 1}, .color = white},
+		}
+	};
+	tris_buffer[tris_len++] = (tris_t){
+		.vertices = {
+			{.pos = {1, 1, 0}, .uv = {1, 0}, .color = white},
+			{.pos = {1, 0, 0}, .uv = {1, 1}, .color = white},
+			{.pos = {0, 1, 0}, .uv = {0, 0}, .color = white},
+		}
+	};
+	render_flush();
+}
+
+static void render_bloom(void) {
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(false);
+	glDisable(GL_BLEND);
+
+	// Extract the masked parts of the backbuffer into the smaller bloom buffer.
+	// Sample the backbuffer with linear filtering for this, so we don't skip
+	// over any pixels.
+	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	vec2_t tap_offset = vec2(
+		bloom_downsample * 0.25 / backbuffer_size.x,
+		bloom_downsample * 0.25 / backbuffer_size.y
+	);
+	// Only let overbright pixels (emissive, specular highlights) bloom when the
+	// lighting is enabled
+	glUseProgram(prg_bloom_extract->program);
+	glUniform1f(prg_bloom_extract->uniform.param_bright, lighting_enabled ? BLOOM_BRIGHT_PASS : 0.0);
+	render_post_pass(prg_bloom_extract, bloom_fbo[0], bloom_size, backbuffer_texture, tap_offset);
+
+	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+	// Blur horizontally and vertically, with increasing spread
+	for (int i = 0; i < BLOOM_BLUR_PASSES; i++) {
+		float spread = i + 1;
+		render_post_pass(prg_bloom_blur, bloom_fbo[1], bloom_size, bloom_texture[0], vec2(spread / bloom_size.x, 0));
+		render_post_pass(prg_bloom_blur, bloom_fbo[0], bloom_size, bloom_texture[1], vec2(0, spread / bloom_size.y));
+	}
+
+	// Add the result on top of the backbuffer
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	render_post_pass(prg_bloom_composite, backbuffer, backbuffer_size, bloom_texture[0], vec2(BLOOM_INTENSITY, 0));
+	render_apply_blend_mode();
+}
+
+void render_scene_post(float motion_blur) {
+	render_flush();
+
+	bool do_motion_blur = motion_blur_enabled && motion_blur >= 0.01;
+	if (!do_motion_blur && !bloom_enabled) {
+		return;
+	}
+
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(false);
+	glDisable(GL_BLEND);
+
+	if (do_motion_blur) {
+		glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+		render_post_pass(prg_motion_blur, scratch_fbo, backbuffer_size, backbuffer_texture, vec2(motion_blur * MOTION_BLUR_STRENGTH, 0));
+
+		glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+		render_post_pass(prg_copy, backbuffer, backbuffer_size, scratch_texture, vec2(0, 0));
+	}
+
+	if (bloom_enabled) {
+		render_bloom();
+	}
+
+	// Back to normal drawing
+	use_program(prg_game);
+	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
+	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
+	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	glEnable(GL_BLEND);
+	render_apply_blend_mode();
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(true);
 }
 
 void render_frame_end(void) {
@@ -674,6 +1090,7 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, projection_mat_3d.m);
 	glUniform3f(prg_game->uniform.camera_pos, pos.x, pos.y, pos.z);
 	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
+	render_set_material(RENDER_MATERIAL_DEFAULT);
 }
 
 void render_set_view_2d(void) {
@@ -685,6 +1102,7 @@ void render_set_view_2d(void) {
 	glUniform3f(prg_game->uniform.camera_pos, 0, 0, 0);
 	glUniformMatrix4fv(prg_game->uniform.view, 1, false, mat4_identity().m);
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, projection_mat_2d.m);
+	render_set_material(RENDER_MATERIAL_UNLIT);
 }
 
 void render_set_model_mat(mat4_t *m) {
@@ -730,11 +1148,40 @@ void render_set_blend_mode(render_blend_mode_t new_mode) {
 	render_flush();
 
 	blend_mode = new_mode;
+	render_apply_blend_mode();
+	render_apply_material();
+}
+
+void render_set_material(render_material_t new_material) {
+	if (new_material == material) {
+		return;
+	}
+	render_flush();
+
+	material = new_material;
+	render_apply_material();
+}
+
+static void render_apply_material(void) {
+	// Additive effects are never lit
+	bool lit = (
+		lighting_enabled &&
+		material != RENDER_MATERIAL_UNLIT &&
+		blend_mode == RENDER_BLEND_NORMAL
+	);
+	const float *params = material_params[material];
+	float lit_mode = !lit ? 0.0 : (material == RENDER_MATERIAL_TRACK ? 2.0 : 1.0);
+	glUniform4f(prg_game->uniform.material, params[0], params[1], params[2], lit_mode);
+}
+
+// The alpha channel of the backbuffer is used as the bloom mask: additive
+// drawing accumulates alpha, normal drawing on top of it removes it again.
+static void render_apply_blend_mode(void) {
 	if (blend_mode == RENDER_BLEND_NORMAL) {
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
 	}
 	else if (blend_mode == RENDER_BLEND_LIGHTER) {
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ONE);
 	}
 }
 
