@@ -230,7 +230,7 @@ void hud_draw(ship_t *ship) {
 	}
 
 	// Speedo
-	int speedo_speed = (g.camera.update_func == camera_update_attract_internal)
+	int speedo_speed = (g.camera->update_func == camera_update_attract_internal)
 		? ship->speed * 7
 		: ship->speed;
 	hud_draw_speedo(speedo_speed, ship->thrust_mag);

@@ -54,6 +54,12 @@ void render_set_resolution(render_resolution_t res);
 void render_set_post_effect(render_post_effect_t post);
 vec2i_t render_size(void);
 
+// Restrict all drawing to a part of the screen (for split screen). pos is the
+// top left corner. render_size() returns the size of the current viewport.
+// Call render_set_view() or render_set_view_2d() afterwards.
+void render_set_viewport(vec2i_t pos, vec2i_t size);
+void render_reset_viewport(void);
+
 void render_frame_prepare(void);
 void render_frame_end(void);
 

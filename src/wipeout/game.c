@@ -928,6 +928,51 @@ void game_init(void) {
 	}
 
 
+	// Player 2; fixed bindings: the second gamepad or IJKL on the keyboard
+	static const struct { button_t button; uint8_t action; } p2_bindings[] = {
+		{INPUT_KEY_I, A_P2_UP},
+		{INPUT_KEY_K, A_P2_DOWN},
+		{INPUT_KEY_J, A_P2_LEFT},
+		{INPUT_KEY_L, A_P2_RIGHT},
+		{INPUT_KEY_COMMA, A_P2_BRAKE_LEFT},
+		{INPUT_KEY_PERIOD, A_P2_BRAKE_RIGHT},
+		{INPUT_KEY_N, A_P2_THRUST},
+		{INPUT_KEY_B, A_P2_FIRE},
+		{INPUT_KEY_O, A_P2_CHANGE_VIEW},
+
+		{INPUT_GAMEPAD2_DPAD_UP, A_P2_UP},
+		{INPUT_GAMEPAD2_DPAD_DOWN, A_P2_DOWN},
+		{INPUT_GAMEPAD2_DPAD_LEFT, A_P2_LEFT},
+		{INPUT_GAMEPAD2_DPAD_RIGHT, A_P2_RIGHT},
+		{INPUT_GAMEPAD2_L_STICK_UP, A_P2_UP},
+		{INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN},
+		{INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT},
+		{INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT},
+		{INPUT_GAMEPAD2_L_SHOULDER, A_P2_BRAKE_LEFT},
+		{INPUT_GAMEPAD2_R_SHOULDER, A_P2_BRAKE_RIGHT},
+		{INPUT_GAMEPAD2_L_TRIGGER, A_P2_BRAKE_LEFT},
+		{INPUT_GAMEPAD2_R_TRIGGER, A_P2_BRAKE_RIGHT},
+		{INPUT_GAMEPAD2_A, A_P2_THRUST},
+		{INPUT_GAMEPAD2_X, A_P2_FIRE},
+		{INPUT_GAMEPAD2_Y, A_P2_CHANGE_VIEW},
+	};
+	for (int i = 0; i < len(p2_bindings); i++) {
+		input_bind(INPUT_LAYER_USER, p2_bindings[i].button, p2_bindings[i].action);
+	}
+
+	// The second gamepad can pause and navigate the menus, too
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_UP, A_MENU_UP);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_DOWN, A_MENU_DOWN);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_LEFT, A_MENU_LEFT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_RIGHT, A_MENU_RIGHT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_B, A_MENU_BACK);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_A, A_MENU_SELECT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_START, A_MENU_START);
+
+	g.num_players = 1;
+	g.view_player = 0;
+	g.camera = &g.cameras[0];
+
 	game_set_scene(GAME_SCENE_INTRO);
 }
 

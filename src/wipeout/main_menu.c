@@ -527,7 +527,24 @@ static void page_race_class_init(menu_t *menu) {
 // -----------------------------------------------------------------------------
 // Race Type
 
+// Pseudo race type for the menu; a single race with two players
+#define MENU_RACE_TYPE_TWO_PLAYER NUM_RACE_TYPES
+
+// The team and pilot pages are used for both players. The player is encoded
+// in the button data.
+#define MENU_PLAYER_DATA(PLAYER, VALUE) ((PLAYER) * 100 + (VALUE))
+#define MENU_DATA_PLAYER(DATA) ((DATA) / 100)
+#define MENU_DATA_VALUE(DATA) ((DATA) % 100)
+
+static void page_team_init_for_player(menu_t *menu, int player);
+static void page_pilot_init_for_player(menu_t *menu, int player);
+
 static void button_race_type_select(menu_t *menu, int data) {
+	g.num_players = 1;
+	if (data == MENU_RACE_TYPE_TWO_PLAYER) {
+		g.num_players = 2;
+		data = RACE_TYPE_SINGLE;
+	}
 	g.race_type = data;
 	g.highscore_tab = g.race_type == RACE_TYPE_TIME_TRIAL ? HIGHSCORE_TAB_TIME_TRIAL : HIGHSCORE_TAB_RACE;
 	page_team_init(menu);
@@ -538,6 +555,10 @@ static void page_race_type_draw(menu_t *menu, int data) {
 		case 0: draw_model(models.misc.championship, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
 		case 1: draw_model(models.misc.single_race, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
 		case 2: draw_model(models.options.stopwatch, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
+		case MENU_RACE_TYPE_TWO_PLAYER:
+			draw_model(models.misc.single_race, vec2(-0.25, -0.2), vec3(0, 0, -400), system_cycle_time());
+			draw_model(models.misc.single_race, vec2( 0.25, -0.2), vec3(0, 0, -400), system_cycle_time() + 1.5);
+			break;
 	}
 }
 
@@ -551,6 +572,7 @@ static void page_race_type_init(menu_t *menu) {
 	for (int i = 0; i < len(def.race_types); i++) {
 		menu_page_add_button(page, i, def.race_types[i].name, button_race_type_select);
 	}
+	menu_page_add_button(page, MENU_RACE_TYPE_TWO_PLAYER, "TWO PLAYER RACE", button_race_type_select);
 }
 
 
@@ -559,11 +581,18 @@ static void page_race_type_init(menu_t *menu) {
 // Team
 
 static void button_team_select(menu_t *menu, int data) {
-	g.team = data;
-	page_pilot_init(menu);
+	int player = MENU_DATA_PLAYER(data);
+	if (player == 1) {
+		g.team2 = MENU_DATA_VALUE(data);
+	}
+	else {
+		g.team = MENU_DATA_VALUE(data);
+	}
+	page_pilot_init_for_player(menu, player);
 }
 
 static void page_team_draw(menu_t *menu, int data) {
+	data = MENU_DATA_VALUE(data);
 	int team_model_index = (data + 3) % 4; // models in the prm are shifted by -1
 	draw_model(models.teams[team_model_index], vec2(0, -0.2), vec3(0, 0, -10000), system_cycle_time());
 	draw_model(g.ships[def.teams[data].pilots[0]].model, vec2(0, -0.3), vec3(-700, -800, -1300), system_cycle_time()*1.1);
@@ -571,14 +600,21 @@ static void page_team_draw(menu_t *menu, int data) {
 }
 
 static void page_team_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "SELECT YOUR TEAM", page_team_draw);
+	page_team_init_for_player(menu, 0);
+}
+
+static void page_team_init_for_player(menu_t *menu, int player) {
+	const char *title = g.num_players == 1
+		? "SELECT YOUR TEAM"
+		: (player == 1 ? "PLAYER 2 SELECT TEAM" : "PLAYER 1 SELECT TEAM");
+	menu_page_t *page = menu_push(menu, (char *)title, page_team_draw);
 	flags_add(page->layout_flags, MENU_FIXED);
 	page->title_pos = vec2i(0, 30);
 	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
 	page->items_pos = vec2i(0, -110);
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
 	for (int i = 0; i < len(def.teams); i++) {
-		menu_page_add_button(page, i, def.teams[i].name, button_team_select);
+		menu_page_add_button(page, MENU_PLAYER_DATA(player, i), def.teams[i].name, button_team_select);
 	}
 }
 
@@ -588,8 +624,20 @@ static void page_team_init(menu_t *menu) {
 // Pilot
 
 static void button_pilot_select(menu_t *menu, int data) {
+	int player = MENU_DATA_PLAYER(data);
+	data = MENU_DATA_VALUE(data);
+
+	if (player == 1) {
+		g.pilot2 = data;
+		page_circuit_init(menu);
+		return;
+	}
+
 	g.pilot = data;
-	if (g.race_type != RACE_TYPE_CHAMPIONSHIP) {
+	if (g.num_players > 1) {
+		page_team_init_for_player(menu, 1);
+	}
+	else if (g.race_type != RACE_TYPE_CHAMPIONSHIP) {
 		page_circuit_init(menu);
 	}
 	else {
@@ -600,18 +648,33 @@ static void button_pilot_select(menu_t *menu, int data) {
 }
 
 static void page_pilot_draw(menu_t *menu, int data) {
+	data = MENU_DATA_VALUE(data);
 	draw_model(models.pilots[def.pilots[data].logo_model], vec2(0, -0.2), vec3(0, 0, -10000), system_cycle_time());
 }
 
 static void page_pilot_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "CHOOSE YOUR PILOT", page_pilot_draw);
+	page_pilot_init_for_player(menu, 0);
+}
+
+static void page_pilot_init_for_player(menu_t *menu, int player) {
+	int team = player == 1 ? g.team2 : g.team;
+	const char *title = g.num_players == 1
+		? "CHOOSE YOUR PILOT"
+		: (player == 1 ? "PLAYER 2 CHOOSE PILOT" : "PLAYER 1 CHOOSE PILOT");
+	menu_page_t *page = menu_push(menu, (char *)title, page_pilot_draw);
 	flags_add(page->layout_flags, MENU_FIXED);
 	page->title_pos = vec2i(0, 30);
 	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
 	page->items_pos = vec2i(0, -110);
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
-	for (int i = 0; i < len(def.teams[g.team].pilots); i++) {
-		menu_page_add_button(page, def.teams[g.team].pilots[i], def.pilots[def.teams[g.team].pilots[i]].name, button_pilot_select);
+	for (int i = 0; i < len(def.teams[team].pilots); i++) {
+		int pilot = def.teams[team].pilots[i];
+
+		// Every pilot only exists once; player 2 can't have the one of player 1
+		if (player == 1 && pilot == g.pilot) {
+			continue;
+		}
+		menu_page_add_button(page, MENU_PLAYER_DATA(player, pilot), def.pilots[pilot].name, button_pilot_select);
 	}
 }
 

@@ -178,13 +178,13 @@ void droid_update_idle(droid_t *droid, ship_t *ship) {
 		droid->update_func = droid_update_rescue;
 		droid->update_timer = DROID_UPDATE_TIME_INITIAL;
 
-		g.camera.update_func = camera_update_rescue;
+		game_ship_camera(ship)->update_func = camera_update_rescue;
 		flags_add(ship->flags, SHIP_VIEW_REMOTE);
 		if (flags_is(ship->section->flags, SECTION_JUMP)) {
-			g.camera.section = ship->section->next;
+			game_ship_camera(ship)->section = ship->section->next;
 		}
 		else {
-			g.camera.section = ship->section;
+			game_ship_camera(ship)->section = ship->section;
 		}
 
 		// If droid is not nearby the rescue position teleport it in!

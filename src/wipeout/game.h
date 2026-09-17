@@ -45,7 +45,20 @@ typedef enum {
 	A_MENU_SELECT,
 	A_MENU_START,
 	A_MENU_QUIT,
+
+	// Player 2; must be in the same order as the player 1 actions above
+	A_P2_UP,
+	A_P2_DOWN,
+	A_P2_LEFT,
+	A_P2_RIGHT,
+	A_P2_BRAKE_LEFT,
+	A_P2_BRAKE_RIGHT,
+	A_P2_THRUST,
+	A_P2_FIRE,
+	A_P2_CHANGE_VIEW,
 } action_t;
+
+#define MAX_PLAYERS 2
 
 
 typedef enum {
@@ -232,6 +245,12 @@ typedef struct {
 	int team;
 	int pilot;
 	int circuit;
+
+	// Split screen; pilot/team above are for player 1
+	int num_players;
+	int team2;
+	int pilot2;
+	int view_player; // the player whose view is currently being drawn
 	bool is_attract_mode;
 	bool show_credits;
 
@@ -246,8 +265,10 @@ typedef struct {
 	pilot_points_t race_ranks[NUM_PILOTS];
 	pilot_points_t championship_ranks[NUM_PILOTS];
 
-	camera_t camera;
-	droid_t droid;
+	// camera points to the camera of the view that is currently updated/drawn
+	camera_t cameras[MAX_PLAYERS];
+	camera_t *camera;
+	droid_t droids[MAX_PLAYERS];
 	ship_t ships[NUM_PILOTS];
 	track_t track;
 
@@ -298,6 +319,14 @@ typedef struct {
 
 extern const game_def_t def;
 extern game_t g;
+
+static inline camera_t *game_ship_camera(ship_t *ship) {
+	return &g.cameras[ship->player > 0 ? ship->player : 0];
+}
+
+static inline ship_t *game_player_ship(int player) {
+	return &g.ships[player == 1 ? g.pilot2 : g.pilot];
+}
 extern save_t save;
 
 void game_init(void);

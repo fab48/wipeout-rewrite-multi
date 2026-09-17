@@ -65,6 +65,7 @@
 
 typedef struct ship_t {
 	int16_t pilot;
+	int16_t player; // -1 for AI ships, otherwise the player index
 	int flags;
 
 	section_t *section, *prev_section;
@@ -150,6 +151,8 @@ typedef struct ship_t {
 	sfx_t *sfx_turbulence;
 	sfx_t *sfx_shield;
 } ship_t;
+
+#define ship_is_player(SHIP) ((SHIP)->player >= 0)
 
 void ships_load(void);
 void ships_init(section_t *section);

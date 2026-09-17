@@ -118,6 +118,15 @@ void ships_init(section_t *section) {
 		}
 	}
 
+	// player 2 starts right in front of player 1
+	if (g.num_players > 1) {
+		for (int i = 0; i < len(ranks_to_pilots)-2; i++) {
+			if (ranks_to_pilots[i] == g.pilot2) {
+				swap(ranks_to_pilots[i], ranks_to_pilots[i+1]);
+			}
+		}
+	}
+
 
 	int start_line_pos = def.circuits[g.circuit].settings[g.race_class].start_line_pos;
 	for (int i = 0; i < start_line_pos - 15; i++) {
@@ -168,7 +177,13 @@ void ships_update(void) {
 			}
 		}
 
-		if (flags_is(g.ships[g.pilot].flags, SHIP_RACING)) {
+		bool is_racing = false;
+		for (int p = 0; p < g.num_players; p++) {
+			if (flags_is(game_player_ship(p)->flags, SHIP_RACING)) {
+				is_racing = true;
+			}
+		}
+		if (is_racing) {
 			sort(g.race_ranks, len(g.race_ranks), sort_rank_compare);
 			for (int32_t i = 0; i < len(g.ships); i++) {
 				g.ships[g.race_ranks[i].pilot].position_rank = i + 1;
@@ -186,7 +201,11 @@ void ships_reset_exhaust_plumes(void) {
 
 static bool ship_exhaust_is_hidden(int i) {
 	return (
-		(flags_is(g.ships[i].flags, SHIP_VIEW_INTERNAL) && flags_not(g.ships[i].flags, SHIP_IN_RESCUE)) ||
+		(
+			g.ships[i].player == g.view_player &&
+			flags_is(g.ships[i].flags, SHIP_VIEW_INTERNAL) &&
+			flags_not(g.ships[i].flags, SHIP_IN_RESCUE)
+		) ||
 		(g.race_type == RACE_TYPE_TIME_TRIAL && i != g.pilot)
 	);
 }
@@ -196,10 +215,7 @@ void ships_draw(void) {
 
 	// Ship models
 	for (int i = 0; i < len(g.ships); i++) {
-		if (
-			(flags_is(g.ships[i].flags, SHIP_VIEW_INTERNAL) && flags_not(g.ships[i].flags, SHIP_IN_RESCUE)) ||
-			(g.race_type == RACE_TYPE_TIME_TRIAL && i != g.pilot)
-		) {
+		if (ship_exhaust_is_hidden(i)) {
 			continue;
 		}
 
@@ -299,7 +315,15 @@ void ship_init(ship_t *self, section_t *section, int pilot, int inv_start_rank) 
 	self->update_timer = UPDATE_TIME_INITIAL;
 	self->position_rank = NUM_PILOTS - inv_start_rank;
 
+	self->player = -1;
 	if (pilot == g.pilot) {
+		self->player = 0;
+	}
+	else if (g.num_players > 1 && pilot == g.pilot2) {
+		self->player = 1;
+	}
+
+	if (ship_is_player(self)) {
 		self->update_func = ship_player_update_intro;
 		self->remote_thrust_max = 2900;
 		self->remote_thrust_mag = 46;
@@ -524,7 +548,7 @@ static void ship_draw_exhaust_trail(ship_t *self, vec3_t *trail) {
 		int a = i == 0 ? 0 : i - 1;
 		int b = i == SHIP_EXHAUST_TRAIL_POINTS - 1 ? i : i + 1;
 		vec3_t dir = vec3_sub(trail[a], trail[b]);
-		vec3_t new_side = vec3_cross(dir, vec3_sub(g.camera.position, trail[i]));
+		vec3_t new_side = vec3_cross(dir, vec3_sub(g.camera->position, trail[i]));
 		float new_side_len = vec3_len(new_side);
 		if (new_side_len > 0.001 && vec3_len(dir) > 1.0) {
 			side = vec3_mulf(new_side, 1.0 / new_side_len);
@@ -611,7 +635,7 @@ void ship_draw_exhaust_glow(ship_t *self) {
 		// the camera to not have it cut off by the surrounding hull polygons.
 		vec3_t nozzle = vec3_lerp(self->exhaust_plume[i].base, self->exhaust_plume[i].initial, 0.35);
 		vec3_t flare_pos = vec3_transform(nozzle, &self->mat);
-		vec3_t to_camera = vec3_sub(g.camera.position, flare_pos);
+		vec3_t to_camera = vec3_sub(g.camera->position, flare_pos);
 		float to_camera_len = vec3_len(to_camera);
 		if (to_camera_len > 1.0) {
 			float pull = min(64.0, to_camera_len * 0.5);
@@ -627,7 +651,7 @@ void ship_draw_exhaust_glow(ship_t *self) {
 
 static void ship_update_exhaust_trail(ship_t *self) {
 	float target = 1.0;
-	if (self->pilot == g.pilot && self->thrust_max > 0) {
+	if (ship_is_player(self) && self->thrust_max > 0) {
 		target = clamp(self->thrust_mag / self->thrust_max, 0.0, 1.0);
 	}
 	self->exhaust_intensity += (target - self->exhaust_intensity) * min(1.0, system_tick() * 8.0);
@@ -731,7 +755,7 @@ void ship_update(ship_t *self) {
 		self->weapon_type == WEAPON_TYPE_NONE &&
 		track_collect_pickups(face)
 	) {
-		if (self->pilot == g.pilot) {
+		if (ship_is_player(self)) {
 			sfx_play(SFX_POWERUP);
 			if (flags_is(self->flags, SHIP_SHIELDED)) {
 				self->weapon_type = weapon_get_random_type(WEAPON_CLASS_PROJECTILE);
@@ -755,7 +779,7 @@ void ship_update(ship_t *self) {
 
 	int exhaust_len;
 
-	if (self->pilot == g.pilot) {
+	if (ship_is_player(self)) {
 		// get the z exhaust_len related to speed or thrust
 		exhaust_len = self->thrust_mag * 0.0625;
 		exhaust_len += self->speed * 0.00390625;
@@ -810,8 +834,8 @@ void ship_update(ship_t *self) {
 				self->weapon_type = WEAPON_TYPE_TURBO;
 			}
 
-			if (self->lap == NUM_LAPS && self->pilot == g.pilot) {
-				race_end();
+			if (self->lap == NUM_LAPS && ship_is_player(self)) {
+				race_player_finished(self);
 			}
 		}
 	}

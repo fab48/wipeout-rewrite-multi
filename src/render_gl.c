@@ -569,6 +569,7 @@ static uint32_t tris_len = 0;
 
 static vec2i_t screen_size;
 static vec2i_t backbuffer_size;
+static vec2i_t viewport_size;
 
 static uint32_t atlas_map[ATLAS_SIZE] = {0};
 static GLuint atlas_texture = 0;
@@ -753,6 +754,14 @@ static mat4_t render_setup_3d_projection_mat(vec2i_t size) {
 	// of 73.75deg.
 	float aspect = (float)size.x / (float)size.y;
 	float fov = (73.75 / 180.0) * 3.14159265358;
+
+	// For very wide views (split screen) the horizontal fov would get way too
+	// large; limit it to 110deg
+	float max_fov_h = (110.0 / 180.0) * 3.14159265358;
+	float fov_h = 2.0 * atan(tan(fov / 2) * aspect);
+	if (fov_h > max_fov_h) {
+		fov = 2.0 * atan(tan(max_fov_h / 2) / aspect);
+	}
 	float f = 1.0 / tan(fov / 2);
 	float nf = 1.0 / (NEAR_PLANE - FAR_PLANE);
 	return mat4(
@@ -854,6 +863,7 @@ void render_set_resolution(render_resolution_t res) {
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
 
+	viewport_size = backbuffer_size;
 	projection_mat_2d = render_setup_2d_projection_mat(backbuffer_size);
 	projection_mat_3d = render_setup_3d_projection_mat(backbuffer_size);
 
@@ -880,13 +890,30 @@ void render_set_post_effect(render_post_effect_t post) {
 }
 
 vec2i_t render_size(void) {
-	return backbuffer_size;
+	return viewport_size;
+}
+
+void render_set_viewport(vec2i_t pos, vec2i_t size) {
+	render_flush();
+
+	// GL has the origin at the bottom left
+	glViewport(pos.x, backbuffer_size.y - pos.y - size.y, size.x, size.y);
+
+	if (size.x != viewport_size.x || size.y != viewport_size.y) {
+		viewport_size = size;
+		projection_mat_2d = render_setup_2d_projection_mat(size);
+		projection_mat_3d = render_setup_3d_projection_mat(size);
+	}
+}
+
+void render_reset_viewport(void) {
+	render_set_viewport(vec2i(0, 0), backbuffer_size);
 }
 
 void render_frame_prepare(void) {
 	use_program(prg_game);
 	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
-	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
+	render_reset_viewport();
 
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
 	glUniform2f(prg_game->uniform.screen, 0, 0);

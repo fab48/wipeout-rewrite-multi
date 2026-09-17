@@ -15,6 +15,11 @@ void render_set_screen_size(vec2i_t size) {
 void render_set_resolution(render_resolution_t res) {
 	(void) res;
 }
+void render_set_viewport(vec2i_t pos, vec2i_t size) {
+	(void) pos;
+	(void) size;
+}
+void render_reset_viewport(void) {}
 void render_scene_post(float motion_blur) {
 	(void) motion_blur;
 }

@@ -3,7 +3,7 @@
 #include "input.h"
 #include "utils.h"
 
-static const char *button_names[] = {
+static const char *button_names[INPUT_BUTTON_MAX] = {
 	NULL,
 	NULL,
 	NULL,

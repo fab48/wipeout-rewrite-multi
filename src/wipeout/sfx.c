@@ -212,12 +212,12 @@ sfx_t *sfx_reserve_loop(sfx_source_t source_index) {
 }
 
 void sfx_set_position(sfx_t *sfx, vec3_t pos, vec3_t vel, float volume) {
-	vec3_t relative_position = vec3_sub(g.camera.position, pos);
-	vec3_t relative_velocity = vec3_sub(g.camera.real_velocity, vel);
+	vec3_t relative_position = vec3_sub(g.camera->position, pos);
+	vec3_t relative_velocity = vec3_sub(g.camera->real_velocity, vel);
 	float distance = vec3_len(relative_position);
 
 	sfx->volume = clamp(scale(distance, 512, 32768, 1, 0), 0, 1) * volume;
-	sfx->pan = -sinf(atan2(g.camera.position.x - pos.x, g.camera.position.z - pos.z)+g.camera.angle.y);
+	sfx->pan = -sinf(atan2(g.camera->position.x - pos.x, g.camera->position.z - pos.z)+g.camera->angle.y);
 
 	// Doppler effect
 	float away = vec3_dot(relative_velocity, relative_position) / distance;

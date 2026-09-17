@@ -10,7 +10,9 @@ static uint64_t perf_freq = 0;
 static bool wants_to_exit = false;
 static SDL_Window *window;
 static SDL_AudioDeviceID audio_device;
-static SDL_GameController *gamepad;
+// Up to two gamepads; the second one is mapped to the INPUT_GAMEPAD2_* buttons
+#define GAMEPADS_MAX 2
+static SDL_GameController *gamepads[GAMEPADS_MAX] = {NULL, NULL};
 static void (*audio_callback)(float *buffer, uint32_t len) = NULL;
 static char *path_assets = "";
 static char *path_userdata = "";
@@ -59,14 +61,55 @@ void platform_exit(void) {
 	wants_to_exit = true;
 }
 
-SDL_GameController *platform_find_gamepad(void) {
-	for (int i = 0; i < SDL_NumJoysticks(); i++) {
-		if (SDL_IsGameController(i)) {
-			return SDL_GameControllerOpen(i);
+static SDL_JoystickID platform_gamepad_instance_id(SDL_GameController *gamepad) {
+	return SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gamepad));
+}
+
+// Returns the slot (0 or 1) of the gamepad with this instance id or -1
+static int platform_gamepad_slot(SDL_JoystickID instance_id) {
+	for (int i = 0; i < GAMEPADS_MAX; i++) {
+		if (gamepads[i] && platform_gamepad_instance_id(gamepads[i]) == instance_id) {
+			return i;
 		}
 	}
+	return -1;
+}
 
-	return NULL;
+static void platform_gamepad_add(int device_index) {
+	if (!SDL_IsGameController(device_index)) {
+		return;
+	}
+	// Already open? SDL reports all present devices as "added" on startup
+	if (platform_gamepad_slot(SDL_JoystickGetDeviceInstanceID(device_index)) != -1) {
+		return;
+	}
+	for (int i = 0; i < GAMEPADS_MAX; i++) {
+		if (!gamepads[i]) {
+			gamepads[i] = SDL_GameControllerOpen(device_index);
+			return;
+		}
+	}
+}
+
+static void platform_gamepad_remove(SDL_JoystickID instance_id) {
+	int slot = platform_gamepad_slot(instance_id);
+	if (slot == -1) {
+		return;
+	}
+	SDL_GameControllerClose(gamepads[slot]);
+	gamepads[slot] = NULL;
+
+	// Release everything this gamepad may have held down
+	int offset = slot == 1 ? INPUT_GAMEPAD2_OFFSET : 0;
+	for (int button = INPUT_GAMEPAD_A; button <= INPUT_GAMEPAD_R_STICK_RIGHT; button++) {
+		input_set_button_state(button + offset, 0.0);
+	}
+}
+
+static void platform_find_gamepads(void) {
+	for (int i = 0; i < SDL_NumJoysticks(); i++) {
+		platform_gamepad_add(i);
+	}
 }
 
 
@@ -101,13 +144,11 @@ void platform_pump_events(void) {
 
 		// Gamepads connect/disconnect
 		else if (ev.type == SDL_CONTROLLERDEVICEADDED) {
-			gamepad = SDL_GameControllerOpen(ev.cdevice.which);
+			platform_gamepad_add(ev.cdevice.which);
 		}
 		else if (ev.type == SDL_CONTROLLERDEVICEREMOVED) {
-			if (gamepad && ev.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(gamepad))) {
-				SDL_GameControllerClose(gamepad);
-				gamepad = platform_find_gamepad();
-			}
+			platform_gamepad_remove(ev.cdevice.which);
+			platform_find_gamepads();
 		}
 
 		// Input Gamepad Buttons
@@ -118,6 +159,9 @@ void platform_pump_events(void) {
 			if (ev.cbutton.button < SDL_CONTROLLER_BUTTON_MAX) {
 				button_t button = platform_sdl_gamepad_map[ev.cbutton.button];
 				if (button != INPUT_INVALID) {
+					if (platform_gamepad_slot(ev.cbutton.which) == 1) {
+						button += INPUT_GAMEPAD2_OFFSET;
+					}
 					float state = ev.type == SDL_CONTROLLERBUTTONDOWN ? 1.0 : 0.0;
 					input_set_button_state(button, state);
 				}
@@ -130,9 +174,16 @@ void platform_pump_events(void) {
 
 			if (ev.caxis.axis < SDL_CONTROLLER_AXIS_MAX) {
 				int code = platform_sdl_axis_map[ev.caxis.axis];
+				int trigger_l = INPUT_GAMEPAD_L_TRIGGER;
+				int trigger_r = INPUT_GAMEPAD_R_TRIGGER;
+				if (platform_gamepad_slot(ev.caxis.which) == 1) {
+					code += INPUT_GAMEPAD2_OFFSET;
+					trigger_l += INPUT_GAMEPAD2_OFFSET;
+					trigger_r += INPUT_GAMEPAD2_OFFSET;
+				}
 				if (
-					code == INPUT_GAMEPAD_L_TRIGGER || 
-					code == INPUT_GAMEPAD_R_TRIGGER
+					code == trigger_l || 
+					code == trigger_r
 				) {
 					input_set_button_state(code, state);
 				}
@@ -403,7 +454,7 @@ int main(int argc, char *argv[]) {
 
 
 
-	gamepad = platform_find_gamepad();
+	platform_find_gamepads();
 
 	perf_freq = SDL_GetPerformanceFrequency();
 
@@ -437,8 +488,11 @@ int main(int argc, char *argv[]) {
 
 	SDL_DestroyWindow(window);
 
-	if (gamepad) {
-		SDL_GameControllerClose(gamepad);
+	for (int i = 0; i < GAMEPADS_MAX; i++) {
+		if (!gamepads[i]) {
+			continue;
+		}
+		SDL_GameControllerClose(gamepads[i]);
 	}
 
 	if (sdl_path_assets) {
