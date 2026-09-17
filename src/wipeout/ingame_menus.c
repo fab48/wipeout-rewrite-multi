@@ -164,9 +164,9 @@ static void page_race_stats_draw(menu_t *menu, int data) {
 			// are those of player 1
 			int number_x = pos.x + ui_text_width("PLAYER 1 POSITION", UI_SIZE_8) + 8;
 			ui_draw_text("PLAYER 1 POSITION", ui_scaled_pos(anchor, vec2i(pos.x, pos.y - 6)), UI_SIZE_8, UI_COLOR_ACCENT);
-			ui_draw_number(game_player_ship(0)->position_rank, ui_scaled_pos(anchor, vec2i(number_x, pos.y - 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
+			ui_draw_number(g.finish_rank[0], ui_scaled_pos(anchor, vec2i(number_x, pos.y - 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
 			ui_draw_text("PLAYER 2 POSITION", ui_scaled_pos(anchor, vec2i(pos.x, pos.y + 6)), UI_SIZE_8, UI_COLOR_ACCENT);
-			ui_draw_number(game_player_ship(1)->position_rank, ui_scaled_pos(anchor, vec2i(number_x, pos.y + 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
+			ui_draw_number(g.finish_rank[1], ui_scaled_pos(anchor, vec2i(number_x, pos.y + 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
 		}
 		else {
 			ui_draw_text("RACE POSITION", ui_scaled_pos(anchor, pos), UI_SIZE_8, UI_COLOR_ACCENT);
@@ -207,7 +207,7 @@ menu_t *race_stats_menu_init(void) {
 		title = "";
 	}
 	else if (g.num_players > 1) {
-		title = game_player_ship(0)->position_rank < game_player_ship(1)->position_rank
+		title = g.finish_rank[0] < g.finish_rank[1]
 			? "PLAYER 1 WINS"
 			: "PLAYER 2 WINS";
 	}

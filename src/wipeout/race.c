@@ -174,7 +174,7 @@ void race_update(void) {
 		else if (g.num_players > 1 && !g.is_attract_mode && ship->lap >= NUM_LAPS) {
 			ui_draw_text_centered("FINISHED", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_16, UI_COLOR_ACCENT);
 			ui_draw_text_centered("POSITION", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(-12, 0)), UI_SIZE_12, UI_COLOR_DEFAULT);
-			ui_draw_number(ship->position_rank, ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(44, 0)), UI_SIZE_12, UI_COLOR_DEFAULT);
+			ui_draw_number(g.finish_rank[p], ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(44, 0)), UI_SIZE_12, UI_COLOR_DEFAULT);
 		}
 	}
 
@@ -355,6 +355,7 @@ void race_release_control(void) {
 // Called when a player crosses the finish line after the last lap. In split
 // screen the race goes on until everybody is done.
 void race_player_finished(ship_t *ship) {
+	g.finish_rank[ship->player] = ship->position_rank;
 	if (g.num_players > 1) {
 		race_release_ship(ship);
 		for (int p = 0; p < g.num_players; p++) {

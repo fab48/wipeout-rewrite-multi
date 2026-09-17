@@ -251,6 +251,7 @@ typedef struct {
 	int team2;
 	int pilot2;
 	int view_player; // the player whose view is currently being drawn
+	int finish_rank[MAX_PLAYERS]; // race position when crossing the finish line
 	bool is_attract_mode;
 	bool show_credits;
 
