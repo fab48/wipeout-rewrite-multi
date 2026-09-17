@@ -12,6 +12,7 @@ typedef enum {
 	RENDER_RES_NATIVE,
 	RENDER_RES_240P,
 	RENDER_RES_480P,
+	RENDER_RES_720P,
 } render_resolution_t;
 
 typedef enum {

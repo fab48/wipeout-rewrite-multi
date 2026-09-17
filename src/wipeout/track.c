@@ -262,6 +262,18 @@ void track_load_sections(char *file_name) {
 		ts->flags = get_i16(bytes, &p);
 		ts->num = get_i16(bytes, &p);
 		p += 2; // padding
+
+		// Bounding sphere of all faces of this section
+		float radius_sq = 0;
+		for (int f = ts->face_start; f < ts->face_start + ts->face_count && f < g.track.face_count; f++) {
+			for (int t = 0; t < 2; t++) {
+				for (int v = 0; v < 3; v++) {
+					vec3_t d = vec3_sub(g.track.faces[f].tris[t].vertices[v].pos, ts->center);
+					radius_sq = max(radius_sq, vec3_dot(d, d));
+				}
+			}
+		}
+		ts->radius = sqrtf(radius_sq);
 		ts++;
 	}
 
@@ -289,18 +301,10 @@ void track_draw(camera_t *camera) {
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.
-	vec3_t cam_pos = camera->position;
-	vec3_t cam_dir = camera_forward(camera);
-	
+	camera_view_cone_t cone = camera_view_cone(camera);
 	for(int32_t i = 0; i < g.track.section_count; i++) {
 		section_t *s = &g.track.sections[i];
-		vec3_t diff = vec3_sub(cam_pos, s->center);
-		float cam_dot = vec3_dot(diff, cam_dir);
-		float dist_sq = vec3_dot(diff, diff);
-		if (
-			cam_dot < 2048 && // FIXME: should use the bounding radius of the section
-			dist_sq < (RENDER_FADEOUT_FAR * RENDER_FADEOUT_FAR)
-		) {
+		if (camera_view_cone_has_sphere(&cone, s->center, s->radius)) {
 			track_draw_section(s);
 		}
 	}

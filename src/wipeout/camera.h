@@ -22,6 +22,32 @@ typedef struct camera_t {
 	float shake_timer;
 } camera_t;
 
+// A cone around the view frustum, for cheap culling of bounding spheres. It's
+// independent of the camera roll.
+typedef struct {
+	vec3_t position;
+	vec3_t forward;
+	float sin_angle;
+	float cos_angle;
+	float far;
+} camera_view_cone_t;
+
+camera_view_cone_t camera_view_cone(camera_t *camera);
+
+static inline bool camera_view_cone_has_sphere(camera_view_cone_t *cone, vec3_t center, float radius) {
+	vec3_t d = vec3_sub(center, cone->position);
+	float dist_sq = vec3_dot(d, d);
+	float far = cone->far + radius;
+	if (dist_sq > far * far) {
+		return false;
+	}
+
+	// Distance of the sphere's center to the surface of the cone
+	float along = vec3_dot(d, cone->forward);
+	float perp = sqrtf(max(0.0f, dist_sq - along * along));
+	return (perp * cone->cos_angle - along * cone->sin_angle) < radius;
+}
+
 void camera_init(camera_t *camera, section_t *section);
 vec3_t camera_forward(camera_t *camera);
 void camera_update(camera_t *camera, ship_t *ship, droid_t *droid);

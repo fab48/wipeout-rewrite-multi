@@ -1,4 +1,5 @@
 #include "../utils.h"
+#include "../render.h"
 #include "../types.h"
 #include "../system.h"
 
@@ -19,6 +20,33 @@ void camera_init(camera_t *camera, section_t *section) {
 	camera->angle = vec3(0, 0, 0);
 	camera->angular_velocity = vec3(0, 0, 0);
 	camera->has_initial_section = false;
+}
+
+camera_view_cone_t camera_view_cone(camera_t *camera) {
+	// This mirrors the projection setup of the renderer: 73.75deg vertical fov,
+	// with the horizontal fov limited to 110deg for very wide views
+	vec2i_t size = render_size();
+	float aspect = (float)size.x / (float)max(size.y, 1);
+	float tan_v = tanf((73.75 / 180.0) * M_PI * 0.5);
+	float tan_h = tan_v * aspect;
+	float tan_h_max = tanf((110.0 / 180.0) * M_PI * 0.5);
+	if (tan_h > tan_h_max) {
+		tan_h = tan_h_max;
+		tan_v = tan_h / aspect;
+	}
+
+	// Half angle of the cone through the corners of the frustum, plus a bit of
+	// margin for the screen shake
+	float angle = atanf(sqrtf(tan_h * tan_h + tan_v * tan_v)) + (8.0 / 180.0) * M_PI;
+	angle = min(angle, (float)(M_PI * 0.5));
+
+	return (camera_view_cone_t){
+		.position = camera->position,
+		.forward = camera_forward(camera),
+		.sin_angle = sinf(angle),
+		.cos_angle = cosf(angle),
+		.far = RENDER_FADEOUT_FAR
+	};
 }
 
 vec3_t camera_forward(camera_t *camera) {

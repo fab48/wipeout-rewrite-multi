@@ -149,17 +149,11 @@ void scene_draw(camera_t *camera) {
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.
-	vec3_t cam_dir = camera_forward(camera);
+	camera_view_cone_t cone = camera_view_cone(camera);
 	Object *object = scene_objects;
-	
+
 	while (object) {
-		vec3_t diff = vec3_sub(camera->position, object->origin);
-		float cam_dot = vec3_dot(diff, cam_dir);
-		float dist_sq = vec3_dot(diff, diff);
-		if (
-			cam_dot < object->radius && 
-			dist_sq < (RENDER_FADEOUT_FAR * RENDER_FADEOUT_FAR)
-		) {
+		if (camera_view_cone_has_sphere(&cone, object->origin, object->radius)) {
 			object_draw(object, &object->mat);
 		}
 		object = object->next;

@@ -159,8 +159,19 @@ static void page_race_stats_draw(menu_t *menu, int data) {
 		render_push_2d(image_pos, ui_scaled(render_texture_size(image)), rgba(0, 0, 0, 128), RENDER_NO_TEXTURE);
 		ui_draw_image(image_pos, image);
 
-		ui_draw_text("RACE POSITION", ui_scaled_pos(anchor, pos), UI_SIZE_8, UI_COLOR_ACCENT);
-		ui_draw_number(g.race_position, ui_scaled_pos(anchor, vec2i(pos.x + ui_text_width("RACE POSITION", UI_SIZE_8)+8, pos.y)), UI_SIZE_8, UI_COLOR_DEFAULT);
+		if (g.num_players > 1) {
+			// Split screen: the positions of both players; the lap times below
+			// are those of player 1
+			int number_x = pos.x + ui_text_width("PLAYER 1 POSITION", UI_SIZE_8) + 8;
+			ui_draw_text("PLAYER 1 POSITION", ui_scaled_pos(anchor, vec2i(pos.x, pos.y - 6)), UI_SIZE_8, UI_COLOR_ACCENT);
+			ui_draw_number(game_player_ship(0)->position_rank, ui_scaled_pos(anchor, vec2i(number_x, pos.y - 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
+			ui_draw_text("PLAYER 2 POSITION", ui_scaled_pos(anchor, vec2i(pos.x, pos.y + 6)), UI_SIZE_8, UI_COLOR_ACCENT);
+			ui_draw_number(game_player_ship(1)->position_rank, ui_scaled_pos(anchor, vec2i(number_x, pos.y + 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
+		}
+		else {
+			ui_draw_text("RACE POSITION", ui_scaled_pos(anchor, pos), UI_SIZE_8, UI_COLOR_ACCENT);
+			ui_draw_number(g.race_position, ui_scaled_pos(anchor, vec2i(pos.x + ui_text_width("RACE POSITION", UI_SIZE_8)+8, pos.y)), UI_SIZE_8, UI_COLOR_DEFAULT);
+		}
 	}
 
 	pos.y += 32;
@@ -194,6 +205,11 @@ menu_t *race_stats_menu_init(void) {
 	char *title;
 	if (g.race_type == RACE_TYPE_TIME_TRIAL) {
 		title = "";
+	}
+	else if (g.num_players > 1) {
+		title = game_player_ship(0)->position_rank < game_player_ship(1)->position_rank
+			? "PLAYER 1 WINS"
+			: "PLAYER 2 WINS";
 	}
 	else if (g.race_position <= QUALIFYING_RANK) {
 		title = "CONGRATULATIONS";
@@ -238,7 +254,8 @@ static void page_race_points_draw(menu_t *menu, int data) {
 	pos.y += 24;
 
 	for (int i = 0; i < len(g.race_ranks); i++) {
-		rgba_t color = g.race_ranks[i].pilot == g.pilot ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT;
+		bool is_player = g.race_ranks[i].pilot == g.pilot || (g.num_players > 1 && g.race_ranks[i].pilot == g.pilot2);
+		rgba_t color = is_player ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT;
 		ui_draw_text(def.pilots[g.race_ranks[i].pilot].name, ui_scaled_pos(anchor, pos), UI_SIZE_8, color);
 		int w = ui_number_width(g.race_ranks[i].points, UI_SIZE_8);
 		ui_draw_number(g.race_ranks[i].points, ui_scaled_pos(anchor, vec2i(pos.x + 280 - w, pos.y)), UI_SIZE_8, color);

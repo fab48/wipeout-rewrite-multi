@@ -35,7 +35,7 @@
 #define ATLAS_GRID 32
 #define ATLAS_BORDER 16
 
-#define RENDER_TRIS_BUFFER_CAPACITY 2048
+#define RENDER_TRIS_BUFFER_CAPACITY 8192
 #define TEXTURES_MAX 1024
 
 
@@ -180,8 +180,11 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 
 	void main(void) {
-		// Flat face normal from the view space position
-		vec3 face = cross(dFdx(v_pos), dFdy(v_pos));
+		// Flat face normal from the view space position; only when lit
+		vec3 face = vec3(0.0);
+		if (material.w > 0.5) {
+			face = cross(dFdx(v_pos), dFdy(v_pos));
+		}
 
 		vec4 tex_color = texture2D(texture, v_uv);
 		vec4 color = tex_color * v_color;
@@ -580,6 +583,8 @@ static mat4_t projection_mat_bb = mat4_identity();
 static mat4_t projection_mat_3d = mat4_identity();
 static mat4_t sprite_mat = mat4_identity();
 static mat4_t view_mat = mat4_identity();
+static mat4_t model_mat = mat4_identity();
+static bool model_mat_is_identity = true;
 
 
 static render_texture_t textures[TEXTURES_MAX];
@@ -700,6 +705,7 @@ void render_init(vec2i_t screen_size) {
 
 	prg_game = shader_game_init();
 	use_program(prg_game);
+	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
 
 	render_set_view(vec3(0, 0, 0), vec3(0, 0, 0));
 	render_set_model_mat(&mat4_identity());
@@ -792,7 +798,12 @@ void render_set_resolution(render_resolution_t res) {
 			backbuffer_size = vec2i(240.0 * aspect, 240);
 		}
 		else if (res == RENDER_RES_480P) {
-			backbuffer_size = vec2i(480.0 * aspect, 480);	
+			backbuffer_size = vec2i(480.0 * aspect, 480);
+		}
+		else if (res == RENDER_RES_720P) {
+			// Never render at more than the native resolution
+			int height = min(720, screen_size.y);
+			backbuffer_size = vec2i(height * aspect, height);
 		}
 		else {
 			die("Invalid resolution: %d", res);
@@ -870,7 +881,7 @@ void render_set_resolution(render_resolution_t res) {
 
 	// Use nearest texture min filter for 240p and 480p
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
-	if (res == RENDER_RES_NATIVE) {
+	if (res == RENDER_RES_NATIVE || res == RENDER_RES_720P) {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, RENDER_USE_MIPMAPS ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
 	}
 	else {
@@ -1132,9 +1143,15 @@ void render_set_view_2d(void) {
 	render_set_material(RENDER_MATERIAL_UNLIT);
 }
 
+// The model matrix is applied on the CPU in render_push_tris(). This is a few
+// thousand cheap vector transforms per frame, but it lets us draw all objects
+// in a handful of big batches instead of one draw call (plus buffer upload and
+// uniform update) per object - which is what really hurts on old drivers. The
+// model uniform of the shader always stays at identity.
 void render_set_model_mat(mat4_t *m) {
-	render_flush();
-	glUniformMatrix4fv(prg_game->uniform.model, 1, false, m->m);
+	mat4_t identity = mat4_identity();
+	model_mat = *m;
+	model_mat_is_identity = (memcmp(m->m, identity.m, sizeof(identity.m)) == 0);
 }
 
 void render_set_depth_write(bool enabled) {
@@ -1241,6 +1258,11 @@ void render_push_tris(tris_t tris, uint16_t texture_index) {
 	for (int i = 0; i < 3; i++) {
 		tris.vertices[i].uv.x += t->offset.x;
 		tris.vertices[i].uv.y += t->offset.y;
+	}
+	if (!model_mat_is_identity) {
+		for (int i = 0; i < 3; i++) {
+			tris.vertices[i].pos = vec3_transform(tris.vertices[i].pos, &model_mat);
+		}
 	}
 	tris_buffer[tris_len++] = tris;
 }

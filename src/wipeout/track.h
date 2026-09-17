@@ -52,6 +52,8 @@ typedef struct section_t {
 
 	int16_t flags;
 	int16_t num;
+
+	float radius; // bounding sphere around center, for culling
 } section_t;
 
 #define SECTION_JUMP            1
