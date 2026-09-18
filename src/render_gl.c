@@ -313,12 +313,13 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			float roughness = clamp(1.0 - smoothness, 0.08, 1.0);
 			float a = roughness * roughness;
 			float a2 = a * a;
-			float rs = max(roughness, 0.4);
+			// (very soft on the track, sharper on the ships)
+			float rs = max(roughness, material.w > 1.5 ? 0.4 : 0.2);
 			float as2 = rs * rs * rs * rs;
 			float d = ndh * ndh * (as2 - 1.0) + 1.0;
 			float ggx = min(as2 / (3.14159 * d * d), 24.0);
 			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
-			vec3 specular = fresnel * ggx * 0.25 * ndl * sun;
+			vec3 specular = fresnel * ggx * (material.w > 1.5 ? 0.25 : 0.4) * ndl * sun;
 
 			// Point lights, computed per vertex. Partly independent of the
 			// albedo, so that dark surfaces (the track) still show the color.
@@ -361,10 +362,10 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 				// gradient instead, which blurs the reflection away.
 				vec3 r_world = (view_inv * vec4(r, 0.0)).xyz;
 				vec3 sky = textureCube(env_map, r_world).rgb;
-				env = mix(env, sky * 1.1, 0.85 * (1.0 - roughness * 0.7));
+				env = mix(env, sky * 1.6, 0.9 * (1.0 - roughness * 0.7));
 			}
 			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
-			vec3 reflection = env * env_fresnel * smoothness * (0.5 + metallic * 0.6);
+			vec3 reflection = env * env_fresnel * smoothness * (0.6 + metallic * 1.0);
 
 			vec3 lit = diffuse + (specular + reflection) * gloss;
 
@@ -733,7 +734,7 @@ static GLuint backbuffer_depth_buffer = 0;
 
 #define BLOOM_TARGET_HEIGHT 256
 #define BLOOM_BLUR_PASSES 4
-#define BLOOM_INTENSITY 1.35
+#define BLOOM_INTENSITY 1.8
 #define BLOOM_BRIGHT_PASS 0.55
 
 #define MOTION_BLUR_STRENGTH 0.16
