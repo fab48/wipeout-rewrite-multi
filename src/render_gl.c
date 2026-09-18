@@ -745,7 +745,7 @@ static render_material_t material = RENDER_MATERIAL_UNLIT;
 static const float material_params[NUM_RENDER_MATERIALS][3] = {
 	[RENDER_MATERIAL_UNLIT]   = {0.0, 0.0, 0.0},
 	[RENDER_MATERIAL_DEFAULT] = {0.0, 0.3, 0.5},
-	[RENDER_MATERIAL_TRACK]   = {0.0, 0.67, 0.6},
+	[RENDER_MATERIAL_TRACK]   = {0.0, 0.75, 0.6},
 	[RENDER_MATERIAL_SCENE]   = {0.0, 0.3, 1.0},
 	[RENDER_MATERIAL_SHIP]    = {0.9, 0.86, 0.7},
 };
