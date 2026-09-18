@@ -402,6 +402,49 @@ void track_draw(camera_t *camera) {
 			track_draw_section(s);
 		}
 	}
+
+	// Boost pads and active pickups glow: draw them a second time, additive,
+	// on top of themselves. That makes them brighter and feeds the bloom.
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-16.0);
+
+	uint8_t boost_alpha = 170;
+	uint8_t pickup_alpha = 110 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 50;
+
+	for(int32_t i = 0; i < g.track.section_count; i++) {
+		section_t *s = &g.track.sections[i];
+		if (!camera_view_cone_has_sphere(&cone, s->center, s->radius)) {
+			continue;
+		}
+		track_face_t *face = g.track.faces + s->face_start;
+		for (int32_t j = 0; j < s->face_count; j++, face++) {
+			uint8_t alpha;
+			if (flags_is(face->flags, FACE_BOOST)) {
+				alpha = boost_alpha;
+			}
+			else if (flags_is(face->flags, FACE_PICKUP_ACTIVE)) {
+				alpha = pickup_alpha;
+			}
+			else {
+				continue;
+			}
+			uint16_t tex_index = texture_from_list(g.track.textures, face->texture);
+			for (int t = 0; t < 2; t++) {
+				tris_t tris = face->tris[t];
+				for (int v = 0; v < 3; v++) {
+					tris.vertices[v].color.a = alpha;
+				}
+				render_push_tris(tris, tex_index);
+			}
+		}
+	}
+
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
+	render_set_material(RENDER_MATERIAL_TRACK);
 }
 
 void track_cycle_pickups(void) {
