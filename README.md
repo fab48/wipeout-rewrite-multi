@@ -1,4 +1,4 @@
-heavely modifie with ClaudeCode for VFX and 2players
+modified with ClaudeCode : add for VFXs and 2players
 
 source to game files : https://archive.org/details/wipeout-pc-redump
 
