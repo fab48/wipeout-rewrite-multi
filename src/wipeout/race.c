@@ -120,7 +120,7 @@ static void race_lights_insert(render_light_t *lights, float *distances, int *li
 
 static void race_set_exhaust_lights(void) {
 	// The POINT LIGHTS video option: how many lights at most, 0 = off
-	int max_active = (save.post_effect & RENDER_POST_POINT_LIGHTS_MASK) >> RENDER_POST_POINT_LIGHTS_SHIFT;
+	int max_active = (render_get_post_effect() & RENDER_POST_POINT_LIGHTS_MASK) >> RENDER_POST_POINT_LIGHTS_SHIFT;
 	max_active = min(max_active, RENDER_LIGHTS_MAX);
 	if (max_active == 0) {
 		render_set_lights(NULL, 0);

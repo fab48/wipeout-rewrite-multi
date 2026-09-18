@@ -67,6 +67,7 @@ void render_cleanup(void);
 void render_set_screen_size(vec2i_t size);
 void render_set_resolution(render_resolution_t res);
 void render_set_post_effect(render_post_effect_t post);
+render_post_effect_t render_get_post_effect(void); // the effective one (may differ from the save with the F3 toggle)
 vec2i_t render_size(void);
 
 // Restrict all drawing to a part of the screen (for split screen). pos is the

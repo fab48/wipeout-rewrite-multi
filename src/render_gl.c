@@ -775,6 +775,7 @@ static GLuint scratch_texture = 0;
 
 static bool bloom_enabled = false;
 static bool tonemap_enabled = true;
+static render_post_effect_t current_post_effect = RENDER_POST_NONE;
 static float draw_distance_factor = 1.0;
 
 #define ENV_SIZE 128
@@ -1095,6 +1096,7 @@ void render_set_post_effect(render_post_effect_t post) {
 	lighting_enabled = (post & RENDER_POST_LIGHTING);
 	render_apply_material();
 	tonemap_enabled = !(post & RENDER_POST_NO_TONEMAP);
+	current_post_effect = post;
 
 	static const float draw_distances[4] = {1.0, 0.75, 0.55, 0.4};
 	render_set_draw_distance(draw_distances[(post & RENDER_POST_DRAW_DISTANCE_MASK) >> RENDER_POST_DRAW_DISTANCE_SHIFT]);
@@ -1434,6 +1436,10 @@ void render_env_finish(void) {
 void render_env_clear(void) {
 	render_flush();
 	glUniform1f(prg_game->uniform.env_amount, 0.0);
+}
+
+render_post_effect_t render_get_post_effect(void) {
+	return current_post_effect;
 }
 
 void render_set_draw_distance(float factor) {

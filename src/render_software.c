@@ -106,6 +106,9 @@ void render_set_screen_size(vec2i_t size) {
 }
 
 void render_set_resolution(render_resolution_t res) {}
+render_post_effect_t render_get_post_effect(void) {
+	return RENDER_POST_NONE;
+}
 void render_set_post_effect(render_post_effect_t post) {}
 void render_scene_post(float motion_blur) {}
 // FIXME: split screen is not supported by the software renderer

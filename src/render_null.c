@@ -43,6 +43,9 @@ void render_set_lights(render_light_t *lights, int len) {
 void render_set_material(render_material_t material) {
 	(void) material;
 }
+render_post_effect_t render_get_post_effect(void) {
+	return RENDER_POST_NONE;
+}
 void render_set_post_effect(render_post_effect_t post) {
 	(void) post;
 }
