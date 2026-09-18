@@ -49,7 +49,7 @@ static void race_set_player_view(int player, vec2i_t screen) {
 #define LIGHTS_MAX_ACTIVE 4
 #define LIGHTS_MAX_DISTANCE 14000.0
 #define FLASH_LIGHTS_MAX 8
-#define FLASH_LIGHT_DURATION 0.4
+#define FLASH_LIGHT_DURATION 0.6
 
 typedef struct {
 	vec3_t pos;
@@ -111,9 +111,30 @@ static void race_set_exhaust_lights(void) {
 		return;
 	}
 
-	render_light_t lights[len(g.ships) + FLASH_LIGHTS_MAX];
-	float distances[len(g.ships) + FLASH_LIGHTS_MAX];
+	render_light_t lights[LIGHTS_MAX_ACTIVE + len(g.ships) + FLASH_LIGHTS_MAX];
+	float distances[LIGHTS_MAX_ACTIVE + len(g.ships) + FLASH_LIGHTS_MAX];
 	int lights_len = 0;
+
+	// Explosions first: they always get a slot, the exhausts only fill up 
+	// what is left
+	for (int i = 0; i < FLASH_LIGHTS_MAX; i++) {
+		flash_light_t *flash = &flash_lights[i];
+		if (flash->timer <= 0) {
+			continue;
+		}
+		float intensity = flash->timer / FLASH_LIGHT_DURATION;
+		race_lights_insert(lights, distances, &lights_len, (render_light_t){
+			.pos = flash->pos,
+			.color = vec3_mulf(flash->color, intensity),
+			.radius = 4200
+		});
+	}
+	lights_len = min(lights_len, LIGHTS_MAX_ACTIVE);
+
+	int flashes_len = lights_len;
+	render_light_t exhausts[len(g.ships)];
+	float exhaust_distances[len(g.ships)];
+	int exhausts_len = 0;
 
 	for (int i = 0; i < len(g.ships); i++) {
 		vec3_t pos;
@@ -121,29 +142,18 @@ static void race_set_exhaust_lights(void) {
 		if (!ship_exhaust_light(&g.ships[i], &pos, &intensity)) {
 			continue;
 		}
-		race_lights_insert(lights, distances, &lights_len, (render_light_t){
+		race_lights_insert(exhausts, exhaust_distances, &exhausts_len, (render_light_t){
 			.pos = pos,
 			.color = vec3(0.35 * intensity, 0.6 * intensity, 1.4 * intensity),
 			.radius = 2800
 		});
 	}
-
-	for (int i = 0; i < FLASH_LIGHTS_MAX; i++) {
-		flash_light_t *flash = &flash_lights[i];
-		if (flash->timer <= 0) {
-			continue;
-		}
-		// Fades out quickly, with a quick bright start
-		float t = flash->timer / FLASH_LIGHT_DURATION;
-		float intensity = t * t;
-		race_lights_insert(lights, distances, &lights_len, (render_light_t){
-			.pos = flash->pos,
-			.color = vec3_mulf(flash->color, intensity),
-			.radius = 3600
-		});
+	for (int i = 0; i < exhausts_len && lights_len < LIGHTS_MAX_ACTIVE; i++) {
+		lights[lights_len++] = exhausts[i];
 	}
 
-	render_set_lights(lights, min(lights_len, LIGHTS_MAX_ACTIVE));
+	render_set_lights(lights, lights_len);
+	(void)flashes_len;
 }
 
 void race_init(void) {
