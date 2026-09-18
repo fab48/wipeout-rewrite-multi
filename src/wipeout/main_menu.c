@@ -50,6 +50,7 @@ static void draw_model(Object *model, vec2_t offset, vec3_t pos, float rotation)
 // Main Menu
 
 static void button_start_game(menu_t *menu, int data) {
+	g.num_players = 1;
 	page_race_class_init(menu);
 }
 
@@ -75,7 +76,18 @@ static void page_main_draw(menu_t *menu, int data) {
 		case 0: draw_model(g.ships[0].model, vec2(0, -0.1), vec3(0, 0, -700), system_cycle_time()); break;
 		case 1: draw_model(models.misc.options, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time()); break;
 		case 2: draw_model(models.misc.msdos, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time()); break;
+		case 3:
+			draw_model(g.ships[0].model, vec2(-0.2, -0.1), vec3(0, 0, -900), system_cycle_time());
+			draw_model(g.ships[2].model, vec2( 0.2, -0.1), vec3(0, 0, -900), system_cycle_time() + 2.0);
+			break;
 	}
+}
+
+static void button_two_players(menu_t *menu, int data) {
+	g.num_players = 2;
+	g.race_type = RACE_TYPE_SINGLE;
+	g.highscore_tab = HIGHSCORE_TAB_RACE;
+	page_race_class_init(menu);
 }
 
 static void page_main_init(menu_t *menu) {
@@ -87,6 +99,7 @@ static void page_main_init(menu_t *menu) {
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
 
 	menu_page_add_button(page, 0, "START GAME", button_start_game);
+	menu_page_add_button(page, 3, "TWO PLAYERS", button_two_players);
 	menu_page_add_button(page, 1, "OPTIONS", button_options);
 
 	#ifndef __EMSCRIPTEN__
@@ -544,7 +557,13 @@ static void button_race_class_select(menu_t *menu, int data) {
 		return;
 	}
 	g.race_class = data;
-	page_race_type_init(menu);
+	if (g.num_players > 1) {
+		// Two players: always a single race, skip the race type page
+		page_team_init(menu);
+	}
+	else {
+		page_race_type_init(menu);
+	}
 }
 
 static void page_race_class_draw(menu_t *menu, int data) {
