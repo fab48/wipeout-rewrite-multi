@@ -169,6 +169,7 @@ void ship_draw_exhaust_plume(ship_t *self);
 void ship_draw_exhaust_glow(ship_t *self);
 bool ship_exhaust_light(ship_t *self, vec3_t *pos, float *intensity);
 uint16_t ship_exhaust_flare_texture(void);
+uint16_t ship_ring_texture(void);
 void ship_spawn_impact_sparks(ship_t *self, vec3_t pos, vec3_t normal, float strength);
 void ship_draw_shadow(ship_t *self);
 void ship_update(ship_t *self);

@@ -52,6 +52,31 @@ uint16_t ship_exhaust_flare_texture(void) {
 	return exhaust_flare_texture;
 }
 
+// A thin, soft ring: the shockwave of the explosions
+static uint16_t ring_texture;
+
+static uint16_t ship_create_ring_texture(void) {
+	int size = 128;
+	rgba_t *pixels = mem_temp_alloc(sizeof(rgba_t) * size * size);
+	for (int y = 0; y < size; y++) {
+		for (int x = 0; x < size; x++) {
+			float u = ((x + 0.5) / size) * 2.0 - 1.0;
+			float v = ((y + 0.5) / size) * 2.0 - 1.0;
+			float r = sqrtf(u * u + v * v);
+			float band = 1.0 - clamp(fabsf(r - 0.78) / 0.14, 0.0, 1.0);
+			float intensity = band * band * (r < 1.0 ? 1.0 : 0.0);
+			pixels[y * size + x] = rgba(128, 128, 128, intensity * 255);
+		}
+	}
+	uint16_t texture = render_texture_create(size, size, pixels);
+	mem_temp_free(pixels);
+	return texture;
+}
+
+uint16_t ship_ring_texture(void) {
+	return ring_texture;
+}
+
 void ships_load(void) {
 	texture_list_t ship_textures = image_get_compressed_textures("wipeout/common/allsh.cmp");
 	Object *ship_models = objects_load("wipeout/common/allsh.prm", ship_textures);
@@ -88,6 +113,7 @@ void ships_load(void) {
 	}
 
 	exhaust_flare_texture = ship_create_exhaust_flare_texture();
+	ring_texture = ship_create_ring_texture();
 }
 
 
@@ -120,6 +146,21 @@ void ships_init(section_t *section) {
 	for (int i = 0; i < len(ranks_to_pilots)-1; i++) {
 		if (ranks_to_pilots[i] == g.pilot) {
 			swap(ranks_to_pilots[i], ranks_to_pilots[i+1]);
+		}
+	}
+
+	// Duel: the two players start at the front, the (parked, hidden) AI ships
+	// stay behind them
+	if (g.duel) {
+		for (int i = len(ranks_to_pilots)-1; i > 0; i--) {
+			if (ranks_to_pilots[i] == g.pilot || ranks_to_pilots[i] == g.pilot2) {
+				swap(ranks_to_pilots[i], ranks_to_pilots[i-1]);
+			}
+		}
+		for (int i = len(ranks_to_pilots)-1; i > 0; i--) {
+			if (ranks_to_pilots[i] == g.pilot || ranks_to_pilots[i] == g.pilot2) {
+				swap(ranks_to_pilots[i], ranks_to_pilots[i-1]);
+			}
 		}
 	}
 
@@ -174,11 +215,15 @@ void ships_update(void) {
 	}
 	else {
 		for (int i = 0; i < len(g.ships); i++) {
-			ship_update(&g.ships[i]);
+			if (game_ship_is_active(&g.ships[i])) {
+				ship_update(&g.ships[i]);
+			}
 		}
 		for (int j = 0; j < (len(g.ships) - 1); j++) {
 			for (int i = j + 1; i < len(g.ships); i++) {
-				ship_collide_with_ship(&g.ships[i], &g.ships[j]);
+				if (game_ship_is_active(&g.ships[i]) && game_ship_is_active(&g.ships[j])) {
+					ship_collide_with_ship(&g.ships[i], &g.ships[j]);
+				}
 			}
 		}
 
@@ -205,6 +250,9 @@ void ships_reset_exhaust_plumes(void) {
 
 
 static bool ship_exhaust_is_hidden(int i) {
+	if (!game_ship_is_active(&g.ships[i])) {
+		return true;
+	}
 	return (
 		(
 			g.ships[i].player == g.view_player &&
@@ -238,7 +286,8 @@ void ships_draw(void) {
 	for (int i = 0; i < len(g.ships); i++) {
 		if (
 			(g.race_type == RACE_TYPE_TIME_TRIAL && i != g.pilot) ||
-			flags_not(g.ships[i].flags, SHIP_VISIBLE) || 
+			!game_ship_is_active(&g.ships[i]) ||
+			flags_not(g.ships[i].flags, SHIP_VISIBLE) ||
 			flags_is(g.ships[i].flags, SHIP_FLYING)
 		) {
 			continue;

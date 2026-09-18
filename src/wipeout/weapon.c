@@ -104,8 +104,78 @@ void weapons_load(void) {
 	weapons_init();
 }
 
+// Explosion effects: a bright flash that swells and fades, and an expanding
+// shockwave ring. Drawn additively in weapons_draw().
+#define EXPLOSIONS_MAX 8
+#define EXPLOSION_DURATION 0.55
+
+typedef struct {
+	vec3_t pos;
+	float timer;
+	rgba_t color;
+} explosion_fx_t;
+
+static explosion_fx_t explosions[EXPLOSIONS_MAX];
+
+static void explosion_add(vec3_t pos, int particle_type) {
+	rgba_t color;
+	switch (particle_type) {
+	case PARTICLE_TYPE_FIRE: color = rgba(128, 80, 30, 255); break;
+	case PARTICLE_TYPE_FIRE_WHITE: color = rgba(128, 118, 100, 255); break;
+	case PARTICLE_TYPE_EBOLT:
+	case PARTICLE_TYPE_GREENY: color = rgba(60, 128, 70, 255); break;
+	default: color = rgba(128, 128, 128, 255); break;
+	}
+	int slot = 0;
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		if (explosions[i].timer < explosions[slot].timer) {
+			slot = i;
+		}
+	}
+	explosions[slot] = (explosion_fx_t){.pos = pos, .timer = EXPLOSION_DURATION, .color = color};
+}
+
+static void explosions_update(void) {
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		if (explosions[i].timer > 0) {
+			explosions[i].timer -= system_tick();
+		}
+	}
+}
+
+static void explosions_draw(void) {
+	uint16_t flare = ship_exhaust_flare_texture();
+	uint16_t ring = ship_ring_texture();
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		explosion_fx_t *e = &explosions[i];
+		if (e->timer <= 0) {
+			continue;
+		}
+		float t = 1.0 - e->timer / EXPLOSION_DURATION; // 0 -> 1
+
+		// Flash: big right away, fading out fast
+		float flash_fade = (1.0 - t) * (1.0 - t);
+		int flash_size = 500 + 700 * t;
+		rgba_t flash = e->color;
+		flash.a = 255 * flash_fade;
+		render_push_sprite(e->pos, vec2i(flash_size, flash_size), flash, flare);
+		rgba_t core = rgba(128, 128, 128, 200 * flash_fade);
+		render_push_sprite(e->pos, vec2i(flash_size * 0.4, flash_size * 0.4), core, flare);
+
+		// Shockwave: grows fast, thins out
+		float ring_t = sqrtf(t);
+		int ring_size = 300 + 2400 * ring_t;
+		rgba_t ring_color = e->color;
+		ring_color.a = 220 * (1.0 - t);
+		render_push_sprite(e->pos, vec2i(ring_size, ring_size), ring_color, ring);
+	}
+}
+
 void weapons_init(void) {
 	weapons_active = 0;
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		explosions[i].timer = 0;
+	}
 }
 
 weapon_t *weapon_init(ship_t *ship) {
@@ -159,6 +229,7 @@ void weapons_fire_delayed(ship_t *ship, int weapon_type) {
 bool weapon_collides_with_track(weapon_t *self);
 
 void weapons_update(void) {
+	explosions_update();
 	for (int i = 0; i < weapons_active; i++) {
 		weapon_t *weapon = &weapons[i];
 		
@@ -206,6 +277,7 @@ void weapons_update(void) {
 					? vec3_mulf(vec3_normalize(weapon->velocity), -600)
 					: vec3(0, 0, 0);
 				race_add_flash_light(vec3_add(weapon->position, back), weapon->track_hit_particle);
+				explosion_add(vec3_add(weapon->position, back), weapon->track_hit_particle);
 				sfx_play_at(SFX_EXPLOSION_2, weapon->position, vec3(0,0,0), 1);
 				weapon->active = false;
 			}
@@ -336,6 +408,8 @@ void weapons_draw(void) {
 		}
 	}
 
+	explosions_draw();
+
 	render_set_depth_offset(0.0);
 	render_set_depth_write(true);
 	render_set_blend_mode(RENDER_BLEND_NORMAL);
@@ -393,6 +467,7 @@ ship_t *weapon_collides_with_ship(weapon_t *self) {
 				particles_spawn(self->position, self->ship_hit_particle, velocity, 256);
 			}
 			race_add_flash_light(self->position, self->ship_hit_particle);
+			explosion_add(self->position, self->ship_hit_particle);
 			return ship;
 		}
 	}

@@ -191,6 +191,7 @@ void race_init(void) {
 	if (g.is_attract_mode) {
 		g.pilot = rand_int(0, len(def.pilots));
 		g.num_players = 1;
+		g.duel = false;
 	}
 	race_start();
 	// render_textures_dump("texture_atlas.png");

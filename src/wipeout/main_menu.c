@@ -15,6 +15,7 @@ static void page_main_init(menu_t *menu);
 static void page_options_init(menu_t *menu);
 static void page_race_class_init(menu_t *menu);
 static void page_race_type_init(menu_t *menu);
+static void page_opponents_init(menu_t *menu);
 static void page_team_init(menu_t *menu);
 static void page_pilot_init(menu_t *menu);
 static void page_circuit_init(menu_t *menu);
@@ -52,6 +53,7 @@ static void draw_model(Object *model, vec2_t offset, vec3_t pos, float rotation)
 
 static void button_start_game(menu_t *menu, int data) {
 	g.num_players = 1;
+	g.duel = false;
 	page_race_class_init(menu);
 }
 
@@ -86,6 +88,7 @@ static void page_main_draw(menu_t *menu, int data) {
 
 static void button_two_players(menu_t *menu, int data) {
 	g.num_players = 2;
+	g.duel = false;
 	g.race_type = RACE_TYPE_SINGLE;
 	g.highscore_tab = HIGHSCORE_TAB_RACE;
 	page_race_class_init(menu);
@@ -634,12 +637,38 @@ static void button_race_class_select(menu_t *menu, int data) {
 	}
 	g.race_class = data;
 	if (g.num_players > 1) {
-		// Two players: always a single race, skip the race type page
-		page_team_init(menu);
+		// Two players: always a single race; with or without the AI ships
+		page_opponents_init(menu);
 	}
 	else {
 		page_race_type_init(menu);
 	}
+}
+
+static void button_opponents_select(menu_t *menu, int data) {
+	g.duel = (data == 1);
+	page_team_init(menu);
+}
+
+static void page_opponents_draw(menu_t *menu, int data) {
+	if (data == 0) {
+		draw_model(models.misc.single_race, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time());
+	}
+	else {
+		draw_model(g.ships[0].model, vec2(-0.2, -0.1), vec3(0, 0, -900), system_cycle_time());
+		draw_model(g.ships[2].model, vec2( 0.2, -0.1), vec3(0, 0, -900), system_cycle_time() + 2.0);
+	}
+}
+
+static void page_opponents_init(menu_t *menu) {
+	menu_page_t *page = menu_push(menu, "SELECT OPPONENTS", page_opponents_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	page->items_pos = vec2i(0, -110);
+	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
+	menu_page_add_button(page, 0, "FULL GRID", button_opponents_select);
+	menu_page_add_button(page, 1, "DUEL", button_opponents_select);
 }
 
 static void page_race_class_draw(menu_t *menu, int data) {

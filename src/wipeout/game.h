@@ -258,6 +258,7 @@ typedef struct {
 
 	// Split screen; pilot/team above are for player 1
 	int num_players;
+	bool duel; // two players only, no AI ships
 	int team2;
 	int pilot2;
 	int view_player; // the player whose view is currently being drawn
@@ -337,6 +338,11 @@ static inline camera_t *game_ship_camera(ship_t *ship) {
 
 static inline ship_t *game_player_ship(int player) {
 	return &g.ships[player == 1 ? g.pilot2 : g.pilot];
+}
+
+// In a duel only the two players' ships take part
+static inline bool game_ship_is_active(ship_t *ship) {
+	return !g.duel || ship->player >= 0;
 }
 extern save_t save;
 
