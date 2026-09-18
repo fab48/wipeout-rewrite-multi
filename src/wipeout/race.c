@@ -62,11 +62,11 @@ static flash_light_t flash_lights[FLASH_LIGHTS_MAX];
 void race_add_flash_light(vec3_t pos, int particle_type) {
 	vec3_t color;
 	switch (particle_type) {
-	case PARTICLE_TYPE_FIRE:       color = vec3(2.2, 1.1, 0.35); break;
-	case PARTICLE_TYPE_FIRE_WHITE: color = vec3(2.0, 1.8, 1.4); break;
+	case PARTICLE_TYPE_FIRE:       color = vec3(11.0, 5.5, 1.8); break;
+	case PARTICLE_TYPE_FIRE_WHITE: color = vec3(10.0, 9.0, 7.0); break;
 	case PARTICLE_TYPE_EBOLT:
-	case PARTICLE_TYPE_GREENY:     color = vec3(0.5, 2.0, 0.7); break;
-	default:                       color = vec3(1.5, 1.5, 1.5); break;
+	case PARTICLE_TYPE_GREENY:     color = vec3(2.5, 10.0, 3.5); break;
+	default:                       color = vec3(7.5, 7.5, 7.5); break;
 	}
 
 	// Take a free slot, or the one that is closest to expiring
