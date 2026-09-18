@@ -1,0 +1,112 @@
+# Builds the game for Linux, Windows and macOS and attaches the binaries to a
+# GitHub release whenever a tag (v*) is pushed. Can also be run by hand.
+#
+# The game data (wipeout/) is not included: copy your own next to the binary.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libglew-dev
+      - name: Build (SDL2, OpenGL)
+        run: make sdl
+      - name: Package
+        run: |
+          mkdir -p dist/wipeout-multi-linux-x64
+          cp wipegame dist/wipeout-multi-linux-x64/
+          cp README-MULTI.md dist/wipeout-multi-linux-x64/README.md
+          echo "Copy your wipeout/ game data folder next to the wipegame binary." > dist/wipeout-multi-linux-x64/GAME-DATA.txt
+          cd dist && tar czf wipeout-multi-linux-x64.tar.gz wipeout-multi-linux-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-glew
+            make
+            zip
+      - name: Build (SDL2, OpenGL)
+        run: make sdl
+      - name: Package (binary + DLLs)
+        run: |
+          mkdir -p dist/wipeout-multi-windows-x64
+          cp wipegame.exe dist/wipeout-multi-windows-x64/
+          for dll in SDL2.dll glew32.dll libwinpthread-1.dll; do
+            cp /ucrt64/bin/$dll dist/wipeout-multi-windows-x64/ || true
+          done
+          # any other runtime DLLs the exe depends on
+          for dll in $(ldd wipegame.exe | grep -i ucrt64 | awk '{print $3}'); do
+            cp "$dll" dist/wipeout-multi-windows-x64/ || true
+          done
+          cp README-MULTI.md dist/wipeout-multi-windows-x64/README.md
+          echo "Copy your wipeout/ game data folder next to wipegame.exe." > dist/wipeout-multi-windows-x64/GAME-DATA.txt
+          cd dist && zip -r wipeout-multi-windows-x64.zip wipeout-multi-windows-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install sdl2 glew
+      - name: Build (SDL2, OpenGL)
+        run: make sdl
+      - name: Package
+        run: |
+          mkdir -p dist/wipeout-multi-macos
+          cp wipegame dist/wipeout-multi-macos/
+          cp README-MULTI.md dist/wipeout-multi-macos/README.md
+          echo "Copy your wipeout/ game data folder next to the wipegame binary. Needs sdl2 and glew from Homebrew." > dist/wipeout-multi-macos/GAME-DATA.txt
+          cd dist && tar czf wipeout-multi-macos-arm64.tar.gz wipeout-multi-macos
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.tar.gz
+
+  release:
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            wipEout rewrite, multi / VFX branch. Game data (the `wipeout/` folder) is not included: copy your own next to the binary.
+
+            Linux and macOS builds link dynamically against SDL2 and GLEW (`apt install libsdl2-2.0-0 libglew2.2` / `brew install sdl2 glew`). The Windows zip includes the DLLs.
