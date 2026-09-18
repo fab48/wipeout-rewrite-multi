@@ -224,6 +224,12 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	uniform vec3 lights_color[6];
 	uniform float lights_len; // float: an int would have a different default precision in the two shaders
 
+	// (1-x)^5 without pow()
+	float pow5(float x) {
+		float x2 = x * x;
+		return x2 * x2 * x;
+	}
+
 	void main(void) {
 		// Smooth vertex normal if the geometry has one, otherwise a flat face
 		// normal from the view space position; only when lit
@@ -318,7 +324,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			float as2 = rs * rs * rs * rs;
 			float d = ndh * ndh * (as2 - 1.0) + 1.0;
 			float ggx = min(as2 / (3.14159 * d * d), 24.0);
-			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
+			vec3 fresnel = f0 + (1.0 - f0) * pow5(1.0 - vdh);
 			vec3 specular = fresnel * ggx * (material.w > 1.5 ? 0.25 : 0.4) * ndl * sun;
 
 			// Point lights, computed per vertex. Partly independent of the
@@ -364,7 +370,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 				vec3 sky = textureCube(env_map, r_world).rgb;
 				env = mix(env, sky * 1.6, 0.9 * (1.0 - roughness * 0.7));
 			}
-			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
+			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow5(1.0 - ndv);
 			vec3 reflection = env * env_fresnel * smoothness * (0.6 + metallic * 1.0);
 
 			vec3 lit = diffuse + (specular + reflection) * gloss;
@@ -390,7 +396,8 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 		if (tonemap > 0.5) {
 			vec3 knee = vec3(0.75);
 			vec3 over = max(color.rgb - knee, vec3(0.0));
-			color.rgb = min(color.rgb, knee) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+			// rational rolloff: same shape as 1 - exp(-x), without the exp()
+			color.rgb = min(color.rgb, knee) + (1.0 - knee) * over / (over + (1.0 - knee));
 		}
 
 		gl_FragColor = color;
@@ -555,10 +562,10 @@ static const char * const SHADER_POST_FS_MOTION_BLUR = SHADER_SOURCE(
 		vec2 dir = v_uv - vec2(0.5, 0.5);
 		float mag = param.x * smoothstep(0.08, 0.7, length(dir));
 		vec4 color = vec4(0.0);
-		for (int i = 0; i < 10; i++) {
-			color += texture2D(texture, v_uv - dir * mag * (float(i) / 10.0));
+		for (int i = 0; i < 8; i++) {
+			color += texture2D(texture, v_uv - dir * mag * (float(i) / 8.0));
 		}
-		gl_FragColor = color / 10.0;
+		gl_FragColor = color / 8.0;
 	}
 );
 
@@ -732,7 +739,7 @@ static GLuint backbuffer = 0;
 static GLuint backbuffer_texture = 0;
 static GLuint backbuffer_depth_buffer = 0;
 
-#define BLOOM_TARGET_HEIGHT 256
+#define BLOOM_TARGET_HEIGHT 180 // the bloom is very blurry anyway; fewer pixels to blur
 #define BLOOM_BLUR_PASSES 4
 #define BLOOM_INTENSITY 2.5
 #define BLOOM_BRIGHT_PASS 0.55
@@ -820,7 +827,8 @@ void render_init(vec2i_t screen_size) {
 
 	float anisotropy = 0;
 	glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+	// 4x is plenty for these textures and much cheaper than 16x on old GPUs
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, min(anisotropy, 4.0));
 
 	uint32_t tw = ATLAS_SIZE * ATLAS_GRID;
 	uint32_t th = ATLAS_SIZE * ATLAS_GRID;
@@ -1178,7 +1186,7 @@ static void render_bloom(void) {
 
 	// Blur horizontally and vertically, with increasing spread
 	for (int i = 0; i < BLOOM_BLUR_PASSES; i++) {
-		float spread = (i + 1) * 2.1;
+		float spread = (i + 1) * 1.5; // scaled with BLOOM_TARGET_HEIGHT to keep the same reach
 		render_post_pass(prg_bloom_blur, bloom_fbo[1], bloom_size, bloom_texture[0], vec2(spread / bloom_size.x, 0));
 		render_post_pass(prg_bloom_blur, bloom_fbo[0], bloom_size, bloom_texture[1], vec2(0, spread / bloom_size.y));
 	}
