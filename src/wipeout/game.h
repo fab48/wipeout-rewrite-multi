@@ -2,6 +2,7 @@
 #define GAME_H
 
 #include "../types.h"
+#include "../render.h"
 
 #include "droid.h"
 #include "ship.h"
@@ -59,6 +60,13 @@ typedef enum {
 } action_t;
 
 #define MAX_PLAYERS 2
+
+// Everything on: bloom (LOWER threshold), motion blur, PBR lighting,
+// tonemapping, 4 point lights. No CRT filter.
+#define GAME_DEFAULT_POST_EFFECT ( \
+	RENDER_POST_BLOOM | RENDER_POST_MOTION_BLUR | RENDER_POST_LIGHTING | \
+	(4 << RENDER_POST_POINT_LIGHTS_SHIFT) | (2 << RENDER_POST_BLOOM_THRESHOLD_SHIFT) \
+)
 
 
 typedef enum {

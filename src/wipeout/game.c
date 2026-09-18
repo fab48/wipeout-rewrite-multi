@@ -607,7 +607,7 @@ save_t save = {
 	.draw_stats = DRAW_STATS_OFF,
 	.fullscreen = false,
 	.screen_res = 0,
-	.post_effect = 0,
+	.post_effect = GAME_DEFAULT_POST_EFFECT,
 
 	.has_rapier_class = true,  // for testing; should be false in prod
 	.has_bonus_circuits = true, // for testing; should be false in prod
@@ -862,6 +862,12 @@ void game_init(void) {
 		if (size == sizeof(save_t) && save_file->magic == SAVE_DATA_MAGIC) {
 			printf("load save data success\n");
 			memcpy(&save, save_file, sizeof(save_t));
+
+			// A save that never had any post effect configured gets the new
+			// defaults (all on)
+			if (save.post_effect == 0) {
+				save.post_effect = GAME_DEFAULT_POST_EFFECT;
+			}
 		}
 		else {
 			printf("unexpected size/magic for save data\n");
