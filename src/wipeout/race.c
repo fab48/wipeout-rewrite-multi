@@ -148,7 +148,7 @@ static void race_set_exhaust_lights(void) {
 		race_lights_insert(exhausts, exhaust_distances, &exhausts_len, (render_light_t){
 			.pos = pos,
 			.color = vec3(0.35 * intensity, 0.6 * intensity, 1.4 * intensity),
-			.radius = 2800
+			.radius = 4200
 		}, LIGHTS_MAX_DISTANCE);
 	}
 	for (int i = 0; i < exhausts_len && lights_len < max_active; i++) {

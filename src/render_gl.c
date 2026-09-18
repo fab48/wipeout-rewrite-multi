@@ -139,7 +139,11 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	varying vec3 v_normal;
 	varying vec3 v_light;
 	varying vec3 v_up;
+	varying vec3 v_pointlight;
 	uniform mat4 view;
+	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2
+	uniform vec3 lights_color[6];
+	uniform int lights_len;
 	uniform mat4 model;
 	uniform mat4 projection;
 	uniform vec2 screen;
@@ -152,6 +156,27 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 		vec4 view_pos = view * model * vec4(pos, 1.0);
 		v_pos = view_pos.xyz;
 		v_normal = (view * vec4(normal, 0.0)).xyz;
+
+		// Point lights (exhausts, explosions) are cheap per vertex lights;
+		// diffuse only. Geometry without normals (sprites, 2d) gets none.
+		v_pointlight = vec3(0.0);
+		if (dot(v_normal, v_normal) > 0.25 && lights_len > 0) {
+			vec3 n = normalize(v_normal);
+			if (dot(n, -v_pos) < 0.0) {
+				n = -n;
+			}
+			for (int i = 0; i < 6; i++) {
+				if (i >= lights_len) {
+					break;
+				}
+				vec3 to_light = lights_pos[i].xyz - v_pos;
+				float dist_sq = dot(to_light, to_light);
+				float falloff = clamp(1.0 - dist_sq * lights_pos[i].w, 0.0, 1.0);
+				float attenuation = falloff * falloff / (1.0 + dist_sq * lights_pos[i].w * 8.0);
+				float ndl = max(dot(n, to_light) * inversesqrt(max(dist_sq, 1.0)), 0.0);
+				v_pointlight += lights_color[i] * attenuation * ndl;
+			}
+		}
 		v_up = (view * vec4(0.0, -1.0, 0.0, 0.0)).xyz;
 
 		// Fixed sun, about 25 degrees above the horizon
@@ -177,9 +202,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec3 v_up;
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
-	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2
-	uniform vec3 lights_color[6];
-	uniform int lights_len;
+	varying vec3 v_pointlight;
 
 	void main(void) {
 		// Smooth vertex normal if the geometry has one, otherwise a flat face
@@ -273,28 +296,9 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
 			vec3 specular = fresnel * ggx * 0.25 * ndl * sun;
 
-			// Point lights (the engine flares of the ships)
-			for (int i = 0; i < 6; i++) {
-				if (i >= lights_len) {
-					break;
-				}
-				vec3 to_light = lights_pos[i].xyz - v_pos;
-				float dist_sq = dot(to_light, to_light);
-				float falloff = clamp(1.0 - dist_sq * lights_pos[i].w, 0.0, 1.0);
-				float attenuation = falloff * falloff / (1.0 + dist_sq * lights_pos[i].w * 8.0);
-				if (attenuation <= 0.0) {
-					continue;
-				}
-				vec3 li = to_light * inversesqrt(max(dist_sq, 1.0));
-				vec3 hi = normalize(li + v);
-				float ndli = max(dot(n, li), 0.0);
-				float ndhi = max(dot(n, hi), 0.0);
-				float di = ndhi * ndhi * (a2 - 1.0) + 1.0;
-				float ggxi = min(a2 / (3.14159 * di * di), 24.0);
-				vec3 radiance = lights_color[i] * attenuation;
-				diffuse += albedo * radiance * ndli * (1.0 - metallic * 0.45);
-				specular += f0 * ggxi * 0.25 * ndli * radiance;
-			}
+			// Point lights, computed per vertex. Partly independent of the
+			// albedo, so that dark surfaces (the track) still show the color.
+			diffuse += v_pointlight * mix(vec3(0.35), albedo, 0.65) * (1.0 - metallic * 0.45);
 
 			// Fake environment reflection: a sky/ground gradient
 			vec3 r = reflect(-v, n);
