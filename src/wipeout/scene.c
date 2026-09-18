@@ -44,6 +44,19 @@ void scene_pulsate_red_light(Object *obj);
 void scene_move_oil_pump(Object *obj);
 void scene_update_aurora_borealis(void);
 
+// Marks the first primitives of an object (the colored light polys) to be 
+// drawn again additively, so they glow and bloom
+static void scene_mark_glow_primitives(Object *obj, int count) {
+	Prm poly = {.primitive = obj->primitives};
+	for (int i = 0; i < count && i < obj->primitives_len; i++) {
+		if (poly.primitive->type != PRM_TYPE_GT4) {
+			break;
+		}
+		flags_add(poly.primitive->flag, PRM_GLOW);
+		poly.gt4++;
+	}
+}
+
 void scene_load(const char *base_path, float sky_y_offset) {
 	bool multiplayer = false;
 	if (def.circuits[g.circuit].release == GAME_WIPEOUT_64) {
@@ -90,10 +103,12 @@ void scene_load(const char *base_path, float sky_y_offset) {
 		if (str_starts_with(obj->name, "start")) {
 			error_if(start_booms_len >= SCENE_START_BOOMS_MAX, "SCENE_START_BOOMS_MAX reached");
 			start_booms[start_booms_len++] = obj;
+			scene_mark_glow_primitives(obj, 3); // the three lights
 		}
 		else if (str_starts_with(obj->name, "redl")) {
 			error_if(red_lights_len >= SCENE_RED_LIGHTS_MAX, "SCENE_RED_LIGHTS_MAX reached");
 			red_lights[red_lights_len++] = obj;
+			scene_mark_glow_primitives(obj, 1);
 		}
 		else if (str_starts_with(obj->name, "donkey")) {
 			error_if(oil_pumps_len >= SCENE_OIL_PUMPS_MAX, "SCENE_OIL_PUMPS_MAX reached");
@@ -158,6 +173,23 @@ void scene_draw(camera_t *camera) {
 		}
 		object = object->next;
 	}
+
+	// The lights (start booms, red beacons) again, additive: brighter and
+	// they feed the bloom
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-16.0);
+	for (int i = 0; i < start_booms_len; i++) {
+		object_draw_filtered(start_booms[i], &start_booms[i]->mat, PRM_GLOW, true);
+	}
+	for (int i = 0; i < red_lights_len; i++) {
+		object_draw_filtered(red_lights[i], &red_lights[i]->mat, PRM_GLOW, true);
+	}
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
+	render_set_material(RENDER_MATERIAL_SCENE);
 }
 
 rgba_t start_boom_color_off = rgba(0x20, 0x20, 0x20, 0xff);

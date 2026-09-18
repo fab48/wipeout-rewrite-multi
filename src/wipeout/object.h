@@ -296,6 +296,7 @@ typedef struct InfiniteLight {
 #define PRM_SINGLE_SIDED 0x0001
 #define PRM_SHIP_ENGINE  0x0002
 #define PRM_TRANSLUCENT  0x0004
+#define PRM_GLOW         0x4000 // our own: drawn a second time, additive (lights)
 
 // Altering this enum (other than adding to the end)
 // will break compatibility with the assets.
