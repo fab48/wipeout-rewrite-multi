@@ -726,14 +726,12 @@ void ship_draw_shadow(ship_t *self) {
 
 	vec3_t center = vec3_mulf(vec3_add(vec3_add(nose, wngl), wngr), 1.0 / 3.0);
 
-	// Two layers: a wide, faint penumbra and the sharper core shadow
-	const float scales[2] = {1.35 * grow, 1.0 * grow};
-	const float alphas[2] = {40, 110};
-	for (int i = 0; i < 2; i++) {
-		rgba_t color = rgba(0, 0, 0, alphas[i] * fade);
-		vec3_t n = vec3_add(center, vec3_mulf(vec3_sub(nose, center), scales[i]));
-		vec3_t l = vec3_add(center, vec3_mulf(vec3_sub(wngl, center), scales[i]));
-		vec3_t r = vec3_add(center, vec3_mulf(vec3_sub(wngr, center), scales[i]));
+	// A single layer, scaled and faded with the flight height
+	{
+		rgba_t color = rgba(0, 0, 0, 128 * fade);
+		vec3_t n = vec3_add(center, vec3_mulf(vec3_sub(nose, center), grow));
+		vec3_t l = vec3_add(center, vec3_mulf(vec3_sub(wngl, center), grow));
+		vec3_t r = vec3_add(center, vec3_mulf(vec3_sub(wngr, center), grow));
 		render_push_tris((tris_t) {
 			.vertices = {
 				{.pos = l, .uv = {0, 256},   .color = color},
