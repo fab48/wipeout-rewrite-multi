@@ -216,7 +216,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 	uniform float tonemap; // 1 = soft knee on the highlights
-	uniform samplerCube env; // the sky, for reflections
+	uniform samplerCube env_map; // the sky, for reflections
 	uniform mat4 view_inv; // view space -> world space (rotation only)
 	uniform float env_amount; // 0 = procedural sky gradient, 1 = cubemap
 	varying vec3 v_pointlight;
@@ -360,7 +360,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 				// GLSL ES 1.0); rough surfaces blend back towards the flat
 				// gradient instead, which blurs the reflection away.
 				vec3 r_world = (view_inv * vec4(r, 0.0)).xyz;
-				vec3 sky = textureCube(env, r_world).rgb;
+				vec3 sky = textureCube(env_map, r_world).rgb;
 				env = mix(env, sky * 1.1, 0.85 * (1.0 - roughness * 0.7));
 			}
 			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
@@ -437,7 +437,7 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
 	s->uniform.tonemap = glGetUniformLocation(s->program, "tonemap");
-	s->uniform.env = glGetUniformLocation(s->program, "env");
+	s->uniform.env = glGetUniformLocation(s->program, "env_map");
 	s->uniform.view_inv = glGetUniformLocation(s->program, "view_inv");
 	s->uniform.env_amount = glGetUniformLocation(s->program, "env_amount");
 	s->uniform.lights_pos = glGetUniformLocation(s->program, "lights_pos");
