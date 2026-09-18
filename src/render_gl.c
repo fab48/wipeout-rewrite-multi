@@ -875,6 +875,7 @@ void render_init(vec2i_t screen_size) {
 	prg_game = shader_game_init();
 	use_program(prg_game);
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
+	render_apply_material();
 	glUniform1f(prg_game->uniform.lights_len, 0);
 	glUniform1f(prg_game->uniform.tonemap, 1.0);
 	glUniform1f(prg_game->uniform.lighting_scale, 1.0);
@@ -1540,6 +1541,12 @@ void render_set_material(render_material_t new_material) {
 }
 
 static void render_apply_material(void) {
+	// render_set_post_effect() is called during render_init(), before the game
+	// shader exists; the material uniform is set once the shader is there
+	if (!prg_game) {
+		return;
+	}
+
 	// Additive effects are never lit
 	bool lit = (
 		lighting_enabled &&
