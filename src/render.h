@@ -25,6 +25,9 @@ typedef enum {
 	// Number of point lights (0..6), stored in three bits
 	RENDER_POST_POINT_LIGHTS_SHIFT = 4,
 	RENDER_POST_POINT_LIGHTS_MASK = (7<<4),
+	// Bloom threshold preset (0..3), two bits
+	RENDER_POST_BLOOM_THRESHOLD_SHIFT = 7,
+	RENDER_POST_BLOOM_THRESHOLD_MASK = (3<<7),
 } render_post_effect_t;
 
 // Materials for the (approximated) PBR lighting. Anything drawn with

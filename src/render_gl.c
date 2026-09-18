@@ -481,6 +481,7 @@ static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
 	uniform sampler2D texture;
 	uniform vec2 param; // downsample tap offset
 	uniform vec2 param_bright; // amount of overbright pixels to let through
+	uniform float param_threshold; // brightness above which pixels bloom
 
 	void main(void) {
 		vec4 color = (
@@ -493,7 +494,7 @@ static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
 		float darkest = min(color.r, min(color.g, color.b));
 		float saturation = (brightness - darkest) / max(brightness, 0.001);
 		// param_bright.x: overbright pixels, param_bright.y: only saturated ones
-		float bright_pass = smoothstep(0.82, 1.0, brightness) * (param_bright.x + param_bright.y * smoothstep(0.7, 0.95, saturation));
+		float bright_pass = smoothstep(param_threshold, 1.0, brightness) * (param_bright.x + param_bright.y * smoothstep(0.7, 0.95, saturation));
 		gl_FragColor = vec4(color.rgb * min(color.a + bright_pass, 1.0), 1.0);
 	}
 );
@@ -619,6 +620,7 @@ typedef struct {
 		GLuint time;
 		GLuint param;
 		GLuint param_bright;
+		GLuint param_threshold;
 	} uniform;
 	struct {
 		GLuint pos;
@@ -632,6 +634,7 @@ void shader_post_general_init(prg_post_t *s) {
 	s->uniform.time = glGetUniformLocation(s->program, "time");
 	s->uniform.param = glGetUniformLocation(s->program, "param");
 	s->uniform.param_bright = glGetUniformLocation(s->program, "param_bright");
+	s->uniform.param_threshold = glGetUniformLocation(s->program, "param_threshold");
 
 	s->attribute.pos = glGetAttribLocation(s->program, "pos");
 	s->attribute.uv = glGetAttribLocation(s->program, "uv");
@@ -726,6 +729,7 @@ static GLuint scratch_fbo = 0;
 static GLuint scratch_texture = 0;
 
 static bool bloom_enabled = false;
+static float bloom_threshold = 0.82;
 static vec2i_t bloom_size;
 static int bloom_downsample = 1;
 static GLuint bloom_fbo[2] = {0, 0};
@@ -1000,6 +1004,10 @@ void render_set_resolution(render_resolution_t res) {
 void render_set_post_effect(render_post_effect_t post) {
 	prg_post = (post & RENDER_POST_CRT) ? prg_post_crt : prg_post_default;
 	bloom_enabled = (post & RENDER_POST_BLOOM);
+
+	// Bloom threshold presets: DEFAULT, LOW, LOWER, HIGH
+	static const float thresholds[4] = {0.82, 0.65, 0.5, 0.95};
+	bloom_threshold = thresholds[(post & RENDER_POST_BLOOM_THRESHOLD_MASK) >> RENDER_POST_BLOOM_THRESHOLD_SHIFT];
 	motion_blur_enabled = (post & RENDER_POST_MOTION_BLUR);
 
 	render_flush();
@@ -1095,6 +1103,7 @@ static void render_bloom(void) {
 	// lighting is enabled
 	glUseProgram(prg_bloom_extract->program);
 	glUniform2f(prg_bloom_extract->uniform.param_bright, lighting_enabled ? BLOOM_BRIGHT_PASS : 0.0, lighting_enabled ? 0.0 : BLOOM_BRIGHT_PASS);
+	glUniform1f(prg_bloom_extract->uniform.param_threshold, bloom_threshold);
 	render_post_pass(prg_bloom_extract, bloom_fbo[0], bloom_size, backbuffer_texture, tap_offset);
 
 	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
