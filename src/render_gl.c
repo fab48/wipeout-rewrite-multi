@@ -116,8 +116,7 @@ static GLuint create_program(const char *vs_source, const char *fs_source) {
 		int log_written;
 		char log[512];
 		glGetProgramInfoLog(program, 512, &log_written, log);
-		die("Error linking shader program: %s
-", log);
+		die("Error linking shader program: %s\n", log);
 	}
 
 	glUseProgram(program);
