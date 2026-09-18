@@ -305,6 +305,9 @@ void race_update(void) {
 		ship_t *ship = game_player_ship(p);
 		if (flags_is(ship->flags, SHIP_RACING)) {
 			hud_draw(ship);
+			if (g.num_players > 1) {
+				hud_draw_player_marker(game_player_ship(1 - p), p == 0 ? "P2" : "P1");
+			}
 		}
 		else if (g.num_players > 1 && !g.is_attract_mode && ship->lap >= NUM_LAPS) {
 			ui_draw_text_centered("FINISHED", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_16, UI_COLOR_ACCENT);

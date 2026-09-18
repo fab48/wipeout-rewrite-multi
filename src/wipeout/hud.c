@@ -176,6 +176,34 @@ static void hud_draw_target_icon(vec3_t position) {
 	render_push_2d(pos, size, rgba(128, 128, 128, 128), target_reticle);
 }
 
+// Split screen: where is the other player? A label above the ship when it is
+// on screen, clamped to the border of the view otherwise.
+void hud_draw_player_marker(ship_t *ship, const char *label) {
+	vec2i_t screen_size = render_size();
+	vec3_t projected = render_transform(vec3_add(ship->position, vec3(0, -300, 0)));
+	int width = ui_text_width(label, UI_SIZE_8);
+	int margin = 8 * ui_get_scale();
+
+	vec2i_t pos;
+	rgba_t color = UI_COLOR_ACCENT;
+	if (projected.z >= 1) {
+		// Behind us: bottom center of the view
+		pos = vec2i(screen_size.x / 2 - width / 2, screen_size.y - margin - 12 * ui_get_scale());
+		color = UI_COLOR_DEFAULT;
+	}
+	else {
+		float x = clamp(projected.x, -1.0, 1.0);
+		float y = clamp(projected.y, -1.0, 1.0);
+		pos = vec2i(
+			(( x + 1.0) / 2.0) * screen_size.x - width / 2,
+			((-y + 1.0) / 2.0) * screen_size.y - 4 * ui_get_scale()
+		);
+		pos.x = clamp(pos.x, margin, screen_size.x - width - margin);
+		pos.y = clamp(pos.y, margin, screen_size.y - margin - 8 * ui_get_scale());
+	}
+	ui_draw_text((char *)label, pos, UI_SIZE_8, color);
+}
+
 void hud_draw(ship_t *ship) {
 	// Current lap time
 	if (ship->lap >= 0) {
