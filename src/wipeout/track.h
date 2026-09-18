@@ -73,6 +73,7 @@ typedef struct track_t {
 	int32_t pickups_len;
 	int32_t total_section_nums;
 	texture_list_t textures;
+	uint16_t *glow_textures; // per track texture: arrow-only variant for the boost pads, or 0xffff
 	
 	track_face_t *faces;
 	section_t *sections;

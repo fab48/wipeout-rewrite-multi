@@ -10,6 +10,72 @@
 #include "camera.h"
 #include "game.h"
 
+// Builds an "arrow only" variant of the textures used by the boost pads: the
+// blue background is turned black, so that the additive glow pass only lights
+// up the arrow itself.
+static void track_load_glow_textures(const char *base_path) {
+	bool wipeout64_mode = def.circuits[g.circuit].release == GAME_WIPEOUT_64;
+	int len = g.track.textures.len;
+	g.track.glow_textures = mem_bump(sizeof(uint16_t) * len);
+	for (int i = 0; i < len; i++) {
+		g.track.glow_textures[i] = 0xffff;
+	}
+
+	// Which textures do the boost faces use?
+	bool *needed = mem_temp_alloc(sizeof(bool) * len);
+	memset(needed, 0, sizeof(bool) * len);
+	int needed_count = 0;
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		if (flags_is(face->flags, FACE_BOOST) && face->texture < len && !needed[face->texture]) {
+			needed[face->texture] = true;
+			needed_count++;
+		}
+	}
+	if (needed_count == 0) {
+		mem_temp_free(needed);
+		return;
+	}
+
+	// Rebuild those tiles, same as in track_load()
+	ttf_t *ttf = track_load_tile_format(get_path(base_path, "library.ttf"));
+	cmp_t *cmp = image_load_compressed(get_path(base_path, "library.cmp"));
+	int temp_tile_size = wipeout64_mode ? 64 : 128;
+	int sub_tile_size  = wipeout64_mode ? 64 : 32;
+	int tiles          = wipeout64_mode ? 1  : 4;
+	image_t *temp_tile = image_alloc(temp_tile_size, temp_tile_size);
+
+	for (int i = 0; i < len; i++) {
+		if (!needed[i]) {
+			continue;
+		}
+		for (int tx = 0; tx < tiles; tx++) {
+			for (int ty = 0; ty < tiles; ty++) {
+				uint32_t sub_tile_index = wipeout64_mode ? i : ttf->tiles[i].near[ty * tiles + tx];
+				image_t *sub_tile = image_load_from_bytes(cmp->entries[sub_tile_index], false);
+				image_copy(sub_tile, temp_tile, 0, 0, sub_tile_size, sub_tile_size, tx * sub_tile_size, ty * sub_tile_size);
+				mem_temp_free(sub_tile);
+			}
+		}
+
+		// Keep the light, non-blue pixels (the arrow), black out the rest
+		for (uint32_t j = 0; j < temp_tile->width * temp_tile->height; j++) {
+			rgba_t *px = &temp_tile->pixels[j];
+			int brightest = max(px->r, max(px->g, px->b));
+			bool is_arrow = brightest > 140 && (px->r + px->g) > px->b;
+			if (!is_arrow) {
+				px->r = px->g = px->b = 0;
+			}
+		}
+		g.track.glow_textures[i] = render_texture_create(temp_tile->width, temp_tile->height, temp_tile->pixels);
+	}
+
+	mem_temp_free(temp_tile);
+	mem_temp_free(cmp);
+	mem_temp_free(ttf);
+	mem_temp_free(needed);
+}
+
 void track_load(const char *base_path) {
 	// Load and assemble high res track tiles
 
@@ -49,6 +115,8 @@ void track_load(const char *base_path) {
 	// Wipeout 2097 .tex loading
 	char *tex_path = get_path(base_path, "track.tex");
 	if (file_exists(tex_path)) track_load_texture_file(tex_path);
+
+	track_load_glow_textures(base_path);
 
 	track_load_sections(get_path(base_path, "track.trs"));
 
@@ -423,8 +491,15 @@ void track_draw(camera_t *camera) {
 		track_face_t *face = g.track.faces + s->face_start;
 		for (int32_t j = 0; j < s->face_count; j++, face++) {
 			uint8_t alpha;
+			uint16_t tex_index = texture_from_list(g.track.textures, face->texture);
 			if (flags_is(face->flags, FACE_BOOST)) {
 				alpha = boost_alpha;
+				// Arrow only variant, if we have one: the glow then doesn't
+				// wash out the arrow
+				if (face->texture < g.track.textures.len && g.track.glow_textures[face->texture] != 0xffff) {
+					tex_index = g.track.glow_textures[face->texture];
+					alpha = 255;
+				}
 			}
 			else if (flags_is(face->flags, FACE_PICKUP_ACTIVE)) {
 				alpha = pickup_alpha;
@@ -432,7 +507,6 @@ void track_draw(camera_t *camera) {
 			else {
 				continue;
 			}
-			uint16_t tex_index = texture_from_list(g.track.textures, face->texture);
 			for (int t = 0; t < 2; t++) {
 				tris_t tris = face->tris[t];
 				for (int v = 0; v < 3; v++) {
