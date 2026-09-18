@@ -755,6 +755,7 @@ static GLuint scratch_fbo = 0;
 static GLuint scratch_texture = 0;
 
 static bool bloom_enabled = false;
+static bool tonemap_enabled = true;
 
 #define ENV_SIZE 128
 static GLuint env_texture = 0;
@@ -1072,7 +1073,7 @@ void render_set_post_effect(render_post_effect_t post) {
 	render_flush();
 	lighting_enabled = (post & RENDER_POST_LIGHTING);
 	render_apply_material();
-	glUniform1f(prg_game->uniform.tonemap, (post & RENDER_POST_NO_TONEMAP) ? 0.0 : 1.0);
+	tonemap_enabled = !(post & RENDER_POST_NO_TONEMAP);
 }
 
 vec2i_t render_size(void) {
@@ -1496,6 +1497,10 @@ static void render_apply_material(void) {
 	const float *params = material_params[material];
 	float lit_mode = !lit ? 0.0 : (material == RENDER_MATERIAL_TRACK ? 2.0 : 1.0);
 	glUniform4f(prg_game->uniform.material, params[0], params[1], params[2], lit_mode);
+
+	// The soft knee only applies to the normally blended scene; additive
+	// effects (flares, glows) keep their full brightness for the bloom
+	glUniform1f(prg_game->uniform.tonemap, (tonemap_enabled && blend_mode == RENDER_BLEND_NORMAL) ? 1.0 : 0.0);
 }
 
 // The alpha channel of the backbuffer is used as the bloom mask: additive

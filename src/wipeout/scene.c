@@ -2,6 +2,7 @@
 #include "../system.h"
 
 #include "object.h"
+#include "ship.h"
 #include "scene.h"
 #include "camera.h"
 #include "game.h"
@@ -162,6 +163,30 @@ void scene_render_sky_env(void) {
 	render_env_finish();
 }
 
+// A halo sprite at the center of each glowing (PRM_GLOW) polygon of an object
+static void scene_draw_light_halos(Object *obj) {
+	Prm poly = {.primitive = obj->primitives};
+	for (int i = 0; i < obj->primitives_len; i++) {
+		if (poly.primitive->type != PRM_TYPE_GT4) {
+			break; // the glow polys are always the first ones
+		}
+		if (flags_is(poly.primitive->flag, PRM_GLOW)) {
+			rgba_t color = poly.gt4->color[0];
+			int brightness = max(color.r, max(color.g, color.b));
+			if (brightness > 64) { // the "off" lights are dark grey
+				vec3_t center = vec3(0, 0, 0);
+				for (int v = 0; v < 4; v++) {
+					center = vec3_add(center, obj->vertices[poly.gt4->coords[v]]);
+				}
+				center = vec3_transform(vec3_mulf(center, 0.25), &obj->mat);
+				color.a = 200;
+				render_push_sprite(center, vec2i(520, 520), color, ship_exhaust_flare_texture());
+			}
+		}
+		poly.gt4++;
+	}
+}
+
 void scene_draw(camera_t *camera) {
 	// Sky
 	render_set_material(RENDER_MATERIAL_UNLIT);
@@ -196,6 +221,16 @@ void scene_draw(camera_t *camera) {
 	}
 	for (int i = 0; i < red_lights_len; i++) {
 		object_draw_filtered(red_lights[i], &red_lights[i]->mat, PRM_GLOW, true);
+	}
+
+	// Plus a big soft halo sprite on each lit light, so that it has enough
+	// footprint on screen to feed the bloom
+	render_set_model_mat(&mat4_identity());
+	for (int i = 0; i < start_booms_len; i++) {
+		scene_draw_light_halos(start_booms[i]);
+	}
+	for (int i = 0; i < red_lights_len; i++) {
+		scene_draw_light_halos(red_lights[i]);
 	}
 	render_set_depth_offset(0.0);
 	render_set_depth_write(true);
