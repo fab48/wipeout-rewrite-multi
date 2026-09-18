@@ -193,7 +193,7 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 		v_up = (view * vec4(0.0, -1.0, 0.0, 0.0)).xyz;
 
 		// Fixed sun, about 25 degrees above the horizon
-		v_light = (view * vec4(0.60, -0.42, 0.68, 0.0)).xyz;
+		v_light = (view * vec4(0.10, -0.42, 0.90, 0.0)).xyz; // azimuth rotated 35deg from (0.60, -0.42, 0.68)
 
 		gl_Position = projection * view_pos;
 		gl_Position.xy += screen.xy * gl_Position.w;
