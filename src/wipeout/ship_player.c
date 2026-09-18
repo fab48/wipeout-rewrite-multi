@@ -345,6 +345,8 @@ void ship_player_update_race(ship_t *self) {
 			if (self->last_impact_time > 0.2) {
 				self->last_impact_time = 0;
 				sfx_play_at(SFX_IMPACT, self->position, vec3(0,0,0), 1);
+				// Scraping the floor: small sparks under the ship
+				ship_spawn_impact_sparks(self, vec3_sub(self->position, vec3_mulf(face->normal, 40)), face->normal, 0.1 + self->speed / 60000.0);
 			}
 			self->velocity = vec3_reflect(self->velocity, face->normal, 2);
 			self->velocity = vec3_mulf(self->velocity, 0.875);

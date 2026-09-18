@@ -13,6 +13,7 @@
 #include "game.h"
 #include "race.h"
 #include "sfx.h"
+#include "particle.h"
 
 #define EXHAUST_FLARE_TEXTURE_SIZE 128
 
@@ -917,6 +918,31 @@ static bool vec3_is_on_face(vec3_t pos, track_face_t *face, float alpha) {
 	return (angle > (0.91552734375 * M_PI * 2));
 }
 
+// Sparks flying off an impact point. strength 0..1 scales the amount and the
+// spread; a hard hit adds fire and a flash of light.
+void ship_spawn_impact_sparks(ship_t *self, vec3_t pos, vec3_t normal, float strength) {
+	strength = clamp(strength, 0.0, 1.0);
+	int count = 4 + (int)(strength * 22);
+	vec3_t base = vec3_mulf(normal, 400 + 900 * strength);
+	// Drag some of the ship's motion along, so the sparks streak the right way
+	vec3_t drift = vec3_mulf(self->velocity, 0.01);
+
+	for (int i = 0; i < count; i++) {
+		vec3_t velocity = vec3_add(vec3_add(base, drift), vec3_rand(500 + 700 * strength));
+		int size = 24 + rand_int(0, 40 + (int)(strength * 40));
+		particles_spawn(pos, PARTICLE_TYPE_FIRE_WHITE, velocity, size);
+	}
+
+	if (strength > 0.55) {
+		int fire = 3 + (int)((strength - 0.55) * 20);
+		for (int i = 0; i < fire; i++) {
+			vec3_t velocity = vec3_add(vec3_mulf(base, 0.5), vec3_rand(400));
+			particles_spawn(pos, PARTICLE_TYPE_FIRE, velocity, 90 + rand_int(0, 90));
+		}
+		race_add_flash_light(pos, PARTICLE_TYPE_FIRE_WHITE);
+	}
+}
+
 void ship_resolve_wing_collision(ship_t *self, track_face_t *face, float direction) {
 	vec3_t collision_vector = vec3_sub(self->section->center, face->tris[0].vertices[2].pos);
 	float angle = vec3_angle(collision_vector, self->mat.basis.forward.vec3);
@@ -940,6 +966,8 @@ void ship_resolve_wing_collision(ship_t *self, track_face_t *face, float directi
 	if (self->last_impact_time > 0.2) {
 		self->last_impact_time = 0;
 		sfx_play_at(SFX_IMPACT, wing_pos, vec3(0, 0, 0), 1);
+		// Grazing the wall: a few sparks; a hard, angled hit: a shower
+		ship_spawn_impact_sparks(self, wing_pos, face->normal, 0.15 + fabsf(angle) * 0.5 + self->speed / 40000.0);
 	}
 }
 
@@ -965,6 +993,8 @@ void ship_resolve_nose_collision(ship_t *self, track_face_t *face, float directi
 	if (self->last_impact_time > 0.2) {
 		self->last_impact_time = 0;
 		sfx_play_at(SFX_IMPACT, ship_nose(self), vec3(0, 0, 0), 1);
+		// Head on into the wall: always a big one (this is what spins the ship)
+		ship_spawn_impact_sparks(self, ship_nose(self), face->normal, 0.6 + self->speed / 30000.0);
 	}
 }
 
@@ -1287,6 +1317,9 @@ void ship_collide_with_ship(ship_t *self, ship_t *other) {
 		self->last_impact_time = 0;
 		vec3_t sound_pos = vec3_mulf(vec3_add(self->position, other->position), 0.5);
 		sfx_play_at(SFX_CRUNCH, sound_pos, vec3(0, 0, 0), 1);
+		vec3_t away = vec3_sub(self->position, other->position);
+		float relative_speed = vec3_len(vec3_sub(self->velocity, other->velocity));
+		ship_spawn_impact_sparks(self, sound_pos, vec3_normalize(away), 0.2 + relative_speed / 12000.0);
 	}
 	flags_add(self->flags, SHIP_COLL);
 	flags_add(other->flags, SHIP_COLL);
