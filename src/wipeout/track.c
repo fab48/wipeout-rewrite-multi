@@ -411,7 +411,7 @@ void track_draw(camera_t *camera) {
 	render_set_depth_write(false);
 	render_set_depth_offset(-16.0);
 
-	uint8_t boost_alpha = 255;
+	uint8_t boost_alpha = 110; // keep the arrow readable
 	uint8_t pickup_alpha = 170 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 70;
 	uint16_t halo_texture = ship_exhaust_flare_texture();
 
@@ -454,7 +454,7 @@ void track_draw(camera_t *camera) {
 			vec3_t c2 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v2, center), 2.2)), lift);
 			vec3_t c3 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v3, center), 2.2)), lift);
 			rgba_t halo = face->tris[0].vertices[0].color;
-			halo.a = alpha * 0.8;
+			halo.a = alpha * 0.6;
 			render_push_tris((tris_t){
 				.vertices = {
 					{.pos = c0, .uv = {0, 0}, .color = halo},
