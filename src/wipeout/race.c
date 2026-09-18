@@ -32,12 +32,25 @@ static void race_set_player_view(int player, vec2i_t screen) {
 	g.camera = &g.cameras[player];
 
 	if (g.num_players > 1) {
-		int half = screen.y / 2;
-		if (player == 0) {
-			render_set_viewport(vec2i(0, 0), vec2i(screen.x, half));
+		if (save.post_effect & RENDER_POST_SPLIT_VERTICAL) {
+			// Side by side
+			int half = screen.x / 2;
+			if (player == 0) {
+				render_set_viewport(vec2i(0, 0), vec2i(half, screen.y));
+			}
+			else {
+				render_set_viewport(vec2i(half, 0), vec2i(screen.x - half, screen.y));
+			}
 		}
 		else {
-			render_set_viewport(vec2i(0, half), vec2i(screen.x, screen.y - half));
+			// Top / bottom
+			int half = screen.y / 2;
+			if (player == 0) {
+				render_set_viewport(vec2i(0, 0), vec2i(screen.x, half));
+			}
+			else {
+				render_set_viewport(vec2i(0, half), vec2i(screen.x, screen.y - half));
+			}
 		}
 	}
 }
@@ -277,7 +290,7 @@ void race_update(void) {
 
 	// Draw 2d; with a smaller HUD for the half height views in split screen
 	int ui_scale = ui_get_scale();
-	if (g.num_players > 1) {
+	if (g.num_players > 1 && !(save.post_effect & RENDER_POST_SPLIT_VERTICAL)) {
 		ui_set_scale(max(1, (ui_scale + 1) / 2));
 	}
 
@@ -308,7 +321,12 @@ void race_update(void) {
 	if (g.num_players > 1) {
 		// Divider between the two views
 		int thickness = max(2, screen.y / 270);
-		render_push_2d(vec2i(0, screen.y / 2 - thickness / 2), vec2i(screen.x, thickness), rgba(0, 0, 0, 255), RENDER_NO_TEXTURE);
+		if (save.post_effect & RENDER_POST_SPLIT_VERTICAL) {
+			render_push_2d(vec2i(screen.x / 2 - thickness / 2, 0), vec2i(thickness, screen.y), rgba(0, 0, 0, 255), RENDER_NO_TEXTURE);
+		}
+		else {
+			render_push_2d(vec2i(0, screen.y / 2 - thickness / 2), vec2i(screen.x, thickness), rgba(0, 0, 0, 255), RENDER_NO_TEXTURE);
+		}
 	}
 
 	if (g.is_attract_mode && !active_menu) {
