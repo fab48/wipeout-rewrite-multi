@@ -1,3 +1,4 @@
+#include <string.h>
 #include "../utils.h"
 #include "../system.h"
 #include "../mem.h"
@@ -939,9 +940,28 @@ void main_menu_init(void) {
 
 	menu_reset(main_menu);
 	page_main_init(main_menu);
+
+	// Coming back from a two player race: straight to the two player setup
+	if (g.return_to_two_players) {
+		g.return_to_two_players = false;
+		main_menu->pages[0].index = 1; // the TWO PLAYERS entry
+		button_two_players(main_menu, 0);
+	}
 }
 
 void main_menu_update(void) {
+	// On the "PLAYER 1 ..." / "PLAYER 2 ..." pages only that player's devices
+	// may navigate, so that player 1 can't pick for player 2
+	menu_page_t *page = &main_menu->pages[main_menu->index];
+	int filter = -1;
+	if (page->title && strncmp(page->title, "PLAYER 1", 8) == 0) {
+		filter = 0;
+	}
+	else if (page->title && strncmp(page->title, "PLAYER 2", 8) == 0) {
+		filter = 1;
+	}
+	input_set_player_filter(filter, A_P2_UP, A_P2_CHANGE_VIEW);
+
 	render_set_view_2d();
 	render_push_2d(vec2i(0, 0), render_size(), rgba(128, 128, 128, 255), background);
 

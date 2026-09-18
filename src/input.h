@@ -197,6 +197,11 @@ uint8_t input_bound_to_action(button_t button);
 
 void input_set_button_state(button_t button, float state);
 void input_set_gamepad_swap(bool swap);
+
+// Only let one player's devices through (-1 = everybody): gamepad 1 and the
+// keyboard keys not bound to a player 2 action, or gamepad 2 and the keys
+// bound to player 2 actions (p2_action_min..max in the user layer).
+void input_set_player_filter(int player, uint8_t p2_action_min, uint8_t p2_action_max);
 void input_set_mouse_pos(int32_t x, int32_t y);
 void input_textinput(int32_t ascii_char);
 

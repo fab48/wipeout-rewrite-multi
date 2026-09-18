@@ -952,6 +952,23 @@ void game_init(void) {
 	}
 
 
+	// Modern gamepad layout for player 1, on top of the classic PS1 style
+	// bindings: left stick steers, right trigger is the thrust, left trigger
+	// fires. Only for buttons the player hasn't bound to something else.
+	static const struct { button_t button; uint8_t action; } p1_analog[] = {
+		{INPUT_GAMEPAD_L_STICK_UP, A_UP},
+		{INPUT_GAMEPAD_L_STICK_DOWN, A_DOWN},
+		{INPUT_GAMEPAD_L_STICK_LEFT, A_LEFT},
+		{INPUT_GAMEPAD_L_STICK_RIGHT, A_RIGHT},
+		{INPUT_GAMEPAD_R_TRIGGER, A_THRUST},
+		{INPUT_GAMEPAD_L_TRIGGER, A_FIRE},
+	};
+	for (int i = 0; i < len(p1_analog); i++) {
+		if (input_bound_to_action(p1_analog[i].button) == INPUT_ACTION_NONE) {
+			input_bind(INPUT_LAYER_USER, p1_analog[i].button, p1_analog[i].action);
+		}
+	}
+
 	// Player 2
 	save2_t *save2_file = (save2_t *)platform_load_userdata("controls2.dat", &size);
 	if (save2_file) {
@@ -968,6 +985,20 @@ void game_init(void) {
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN);
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT);
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT);
+	if (input_bound_to_action(INPUT_GAMEPAD2_R_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_R_TRIGGER, A_P2_THRUST);
+	}
+	if (input_bound_to_action(INPUT_GAMEPAD2_L_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_TRIGGER, A_P2_FIRE);
+	}
+
+	// Player 2's keys navigate the menus too (I/K/J/L, N select, B back)
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_I, A_MENU_UP);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_K, A_MENU_DOWN);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_J, A_MENU_LEFT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_L, A_MENU_RIGHT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_N, A_MENU_SELECT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_B, A_MENU_BACK);
 
 	// F3: compare with and without all the render effects
 	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_F3, A_TOGGLE_FX);

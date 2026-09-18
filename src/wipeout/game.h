@@ -259,6 +259,7 @@ typedef struct {
 	// Split screen; pilot/team above are for player 1
 	int num_players;
 	bool duel; // two players only, no AI ships
+	bool return_to_two_players; // main menu opens on the two player setup
 	int team2;
 	int pilot2;
 	int view_player; // the player whose view is currently being drawn

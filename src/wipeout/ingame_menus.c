@@ -45,6 +45,7 @@ static void button_restart_or_quit(menu_t *menu, int data) {
 		race_restart();
 	}
 	else {
+		g.return_to_two_players = (g.num_players > 1);
 		game_set_scene(GAME_SCENE_MAIN_MENU);
 	}
 }

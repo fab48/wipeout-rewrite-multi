@@ -177,6 +177,7 @@ static void race_set_exhaust_lights(void) {
 
 void race_init(void) {
 	ingame_menus_load();
+	input_set_player_filter(-1, A_P2_UP, A_P2_CHANGE_VIEW);
 	menu_is_scroll_text = false;
 
 	const circuit_settings_t *cs = &def.circuits[g.circuit].settings[g.race_class];

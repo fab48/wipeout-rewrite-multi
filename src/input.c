@@ -225,9 +225,32 @@ void input_set_layer_button_state(input_layer_t layer, button_t button, float st
 }
 
 static bool gamepad_swap = false;
+static int player_filter = -1;
+static uint8_t player2_action_min = 0, player2_action_max = 0;
 
 void input_set_gamepad_swap(bool swap) {
 	gamepad_swap = swap;
+}
+
+void input_set_player_filter(int player, uint8_t p2_action_min, uint8_t p2_action_max) {
+	if (player != player_filter) {
+		// Don't leave anything stuck when we start ignoring a device
+		input_clear();
+	}
+	player_filter = player;
+	player2_action_min = p2_action_min;
+	player2_action_max = p2_action_max;
+}
+
+static bool input_button_belongs_to_player2(button_t button) {
+	if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
+		return true;
+	}
+	if (button < INPUT_KEY_MAX) {
+		uint8_t action = bindings[INPUT_LAYER_USER][button];
+		return action >= player2_action_min && action <= player2_action_max;
+	}
+	return false;
 }
 
 void input_set_button_state(button_t button, float state) {
@@ -240,6 +263,15 @@ void input_set_button_state(button_t button, float state) {
 		}
 		else if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
 			button -= INPUT_GAMEPAD2_OFFSET;
+		}
+	}
+
+	// Menus for one player only (team/pilot selection in split screen)
+	if (player_filter >= 0 && !capture_callback) {
+		bool is_player2 = input_button_belongs_to_player2(button);
+		bool is_mouse = button >= INPUT_MOUSE_LEFT;
+		if (!is_mouse && is_player2 != (player_filter == 1)) {
+			return;
 		}
 	}
 
