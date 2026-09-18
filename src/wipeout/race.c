@@ -46,7 +46,7 @@ static void race_set_player_view(int player, vec2i_t screen) {
 // explosions. Only the closest few within LIGHTS_MAX_DISTANCE of the camera
 // are used. This is an option (POINT LIGHTS in the video options) and needs
 // the PBR lighting to have any effect.
-#define LIGHTS_MAX_ACTIVE 4
+#define LIGHTS_MAX_ACTIVE RENDER_LIGHTS_MAX
 #define LIGHTS_MAX_DISTANCE 14000.0
 #define FLASH_LIGHTS_MAX 8
 #define FLASH_LIGHT_DURATION 0.6
@@ -106,7 +106,10 @@ static void race_lights_insert(render_light_t *lights, float *distances, int *li
 }
 
 static void race_set_exhaust_lights(void) {
-	if (!(save.post_effect & RENDER_POST_POINT_LIGHTS)) {
+	// The POINT LIGHTS video option: how many lights at most, 0 = off
+	int max_active = (save.post_effect & RENDER_POST_POINT_LIGHTS_MASK) >> RENDER_POST_POINT_LIGHTS_SHIFT;
+	max_active = min(max_active, RENDER_LIGHTS_MAX);
+	if (max_active == 0) {
 		render_set_lights(NULL, 0);
 		return;
 	}
@@ -129,7 +132,7 @@ static void race_set_exhaust_lights(void) {
 			.radius = 4200
 		});
 	}
-	lights_len = min(lights_len, LIGHTS_MAX_ACTIVE);
+	lights_len = min(lights_len, max_active);
 
 	int flashes_len = lights_len;
 	render_light_t exhausts[len(g.ships)];
@@ -148,7 +151,7 @@ static void race_set_exhaust_lights(void) {
 			.radius = 2800
 		});
 	}
-	for (int i = 0; i < exhausts_len && lights_len < LIGHTS_MAX_ACTIVE; i++) {
+	for (int i = 0; i < exhausts_len && lights_len < max_active; i++) {
 		lights[lights_len++] = exhausts[i];
 	}
 

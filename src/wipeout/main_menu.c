@@ -385,8 +385,25 @@ static void toggle_post_lighting(menu_t *menu, int data) {
 	toggle_post_flag(RENDER_POST_LIGHTING, data);
 }
 
+static const int point_light_counts[] = {0, 1, 2, 3, 4, 6};
+static const char *opts_point_lights[] = {"OFF", "1", "2", "3", "4", "6"};
+
+static int point_lights_option_index(void) {
+	int count = (save.post_effect & RENDER_POST_POINT_LIGHTS_MASK) >> RENDER_POST_POINT_LIGHTS_SHIFT;
+	int index = 0;
+	for (int i = 0; i < len(point_light_counts); i++) {
+		if (point_light_counts[i] <= count) {
+			index = i;
+		}
+	}
+	return index;
+}
+
 static void toggle_post_point_lights(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_POINT_LIGHTS, data);
+	save.post_effect &= ~RENDER_POST_POINT_LIGHTS_MASK;
+	save.post_effect |= point_light_counts[data] << RENDER_POST_POINT_LIGHTS_SHIFT;
+	render_set_post_effect(save.post_effect);
+	save.is_dirty = true;
 }
 
 static void toggle_screen_shake(menu_t *menu, int data) {
@@ -422,7 +439,7 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM) ? 1 : 0, "BLOOM", opts_off_on, len(opts_off_on), toggle_post_bloom);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_POINT_LIGHTS) ? 1 : 0, "POINT LIGHTS", opts_off_on, len(opts_off_on), toggle_post_point_lights);
+	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_post_point_lights);
 }
 
 // -----------------------------------------------------------------------------
