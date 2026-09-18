@@ -129,7 +129,7 @@ static void race_set_exhaust_lights(void) {
 		race_lights_insert(lights, distances, &lights_len, (render_light_t){
 			.pos = flash->pos,
 			.color = vec3_mulf(flash->color, intensity),
-			.radius = 6000
+			.radius = 18000
 		}, RENDER_FADEOUT_FAR); // explosions are rare: no distance limit
 	}
 	lights_len = min(lights_len, max_active);
