@@ -757,6 +757,7 @@ static GLuint scratch_texture = 0;
 
 static bool bloom_enabled = false;
 static bool tonemap_enabled = true;
+static float draw_distance_factor = 1.0;
 
 #define ENV_SIZE 128
 static GLuint env_texture = 0;
@@ -1075,6 +1076,9 @@ void render_set_post_effect(render_post_effect_t post) {
 	lighting_enabled = (post & RENDER_POST_LIGHTING);
 	render_apply_material();
 	tonemap_enabled = !(post & RENDER_POST_NO_TONEMAP);
+
+	static const float draw_distances[4] = {1.0, 0.75, 0.55, 0.4};
+	render_set_draw_distance(draw_distances[(post & RENDER_POST_DRAW_DISTANCE_MASK) >> RENDER_POST_DRAW_DISTANCE_SHIFT]);
 }
 
 vec2i_t render_size(void) {
@@ -1315,7 +1319,7 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 		}
 	}
 	glUniformMatrix4fv(prg_game->uniform.view_inv, 1, false, view_inv.m);
-	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
+	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR * draw_distance_factor, RENDER_FADEOUT_FAR * draw_distance_factor);
 	render_set_material(RENDER_MATERIAL_DEFAULT);
 	render_set_lights(NULL, 0);
 }
@@ -1377,7 +1381,7 @@ void render_env_begin(int face) {
 	glUniformMatrix4fv(prg_game->uniform.view, 1, false, view_mat.m);
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, env_projection.m);
 	glUniform3f(prg_game->uniform.camera_pos, 0, 0, 0);
-	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
+	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR * draw_distance_factor, RENDER_FADEOUT_FAR * draw_distance_factor);
 	glUniform2f(prg_game->uniform.screen, 0, 0);
 	render_set_model_mat(&mat4_identity());
 	render_set_material(RENDER_MATERIAL_UNLIT);
@@ -1411,6 +1415,14 @@ void render_env_finish(void) {
 void render_env_clear(void) {
 	render_flush();
 	glUniform1f(prg_game->uniform.env_amount, 0.0);
+}
+
+void render_set_draw_distance(float factor) {
+	draw_distance_factor = clamp(factor, 0.2, 1.0);
+}
+
+float render_draw_distance(void) {
+	return RENDER_FADEOUT_FAR * draw_distance_factor;
 }
 
 void render_set_view_2d(void) {

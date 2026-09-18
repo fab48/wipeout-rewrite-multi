@@ -224,8 +224,24 @@ void input_set_layer_button_state(input_layer_t layer, button_t button, float st
 	}
 }
 
+static bool gamepad_swap = false;
+
+void input_set_gamepad_swap(bool swap) {
+	gamepad_swap = swap;
+}
+
 void input_set_button_state(button_t button, float state) {
 	error_if(button < 0 || button >= INPUT_BUTTON_MAX, "Invalid input button %d", button);
+
+	// Gamepad 1 <-> gamepad 2
+	if (gamepad_swap) {
+		if (button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT) {
+			button += INPUT_GAMEPAD2_OFFSET;
+		}
+		else if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
+			button -= INPUT_GAMEPAD2_OFFSET;
+		}
+	}
 
 	input_set_layer_button_state(INPUT_LAYER_SYSTEM, button, state);
 	input_set_layer_button_state(INPUT_LAYER_USER, button, state);

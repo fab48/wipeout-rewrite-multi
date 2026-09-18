@@ -324,6 +324,7 @@ static void page_options_controls_init_for_player(menu_t *menu, int player) {
 
 	if (player == 0) {
 		menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
+		menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SWAP_GAMEPADS) ? 1 : 0, "SWAP GAMEPADS", opts_off_on, len(opts_off_on), toggle_swap_gamepads);
 		menu_page_add_button(page, 0, "PLAYER 2 CONTROLS", button_player2_controls);
 	}
 }
@@ -395,6 +396,24 @@ static void toggle_post_bloom_threshold(menu_t *menu, int data) {
 }
 
 static const char *opts_split[] = {"HORIZONTAL", "VERTICAL"};
+static const char *opts_view[] = {"INTERNAL", "EXTERNAL"};
+static const char *opts_draw_distance[] = {"FULL", "FAR", "MEDIUM", "NEAR"};
+
+static void toggle_default_view(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_EXTERNAL_VIEW, data);
+}
+
+static void toggle_draw_distance(menu_t *menu, int data) {
+	save.post_effect &= ~RENDER_POST_DRAW_DISTANCE_MASK;
+	save.post_effect |= data << RENDER_POST_DRAW_DISTANCE_SHIFT;
+	render_set_post_effect(save.post_effect);
+	save.is_dirty = true;
+}
+
+static void toggle_swap_gamepads(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_SWAP_GAMEPADS, data);
+	input_set_gamepad_swap(data);
+}
 
 static void toggle_split(menu_t *menu, int data) {
 	toggle_post_flag(RENDER_POST_SPLIT_VERTICAL, data);
@@ -460,6 +479,8 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_NO_TONEMAP) ? 0 : 1, "TONEMAPPING", opts_off_on, len(opts_off_on), toggle_post_tonemap);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SPLIT_VERTICAL) ? 1 : 0, "SPLIT SCREEN", opts_split, len(opts_split), toggle_split);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_EXTERNAL_VIEW) ? 1 : 0, "DEFAULT VIEW", opts_view, len(opts_view), toggle_default_view);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_DRAW_DISTANCE_MASK) >> RENDER_POST_DRAW_DISTANCE_SHIFT, "DRAW DISTANCE", opts_draw_distance, len(opts_draw_distance), toggle_draw_distance);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
 	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_post_point_lights);
 }

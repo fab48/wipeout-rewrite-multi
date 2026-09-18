@@ -45,7 +45,7 @@ camera_view_cone_t camera_view_cone(camera_t *camera) {
 		.forward = camera_forward(camera),
 		.sin_angle = sinf(angle),
 		.cos_angle = cosf(angle),
-		.far = RENDER_FADEOUT_FAR
+		.far = render_draw_distance()
 	};
 }
 
@@ -114,8 +114,14 @@ void camera_update_race_intro(camera_t *camera, ship_t *ship, droid_t *droid) {
 	camera->angle.y = -atan2f(target.x, target.z);
 
 	if (ship->update_timer <= UPDATE_TIME_RACE_VIEW) {
-		flags_add(ship->flags, SHIP_VIEW_INTERNAL);
-		camera->update_func = camera_update_race_internal;
+		if (save.post_effect & RENDER_POST_EXTERNAL_VIEW) {
+			flags_rm(ship->flags, SHIP_VIEW_INTERNAL);
+			camera->update_func = camera_update_race_external;
+		}
+		else {
+			flags_add(ship->flags, SHIP_VIEW_INTERNAL);
+			camera->update_func = camera_update_race_internal;
+		}
 	}
 }
 

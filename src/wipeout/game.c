@@ -979,6 +979,7 @@ void game_init(void) {
 	g.num_players = 1;
 	g.view_player = 0;
 	g.camera = &g.cameras[0];
+	input_set_gamepad_swap(save.post_effect & RENDER_POST_SWAP_GAMEPADS);
 
 	game_set_scene(GAME_SCENE_INTRO);
 }

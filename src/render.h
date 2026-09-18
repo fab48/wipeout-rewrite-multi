@@ -30,6 +30,11 @@ typedef enum {
 	RENDER_POST_BLOOM_THRESHOLD_MASK = (3<<7),
 	RENDER_POST_NO_TONEMAP = (1<<9), // inverted, so that old saves keep the tonemapping on
 	RENDER_POST_SPLIT_VERTICAL = (1<<10), // split screen side by side instead of top/bottom
+	RENDER_POST_SWAP_GAMEPADS = (1<<11), // gamepad 1 controls player 2 and vice versa
+	RENDER_POST_EXTERNAL_VIEW = (1<<12), // start races in the external view
+	// Draw distance preset (0..3), two bits: FULL, FAR, MEDIUM, NEAR
+	RENDER_POST_DRAW_DISTANCE_SHIFT = 13,
+	RENDER_POST_DRAW_DISTANCE_MASK = (3<<13),
 } render_post_effect_t;
 
 // Materials for the (approximated) PBR lighting. Anything drawn with
@@ -105,6 +110,10 @@ void render_env_begin(int face);
 void render_env_end(void);
 void render_env_finish(void); // after the last face; enables the reflection
 void render_env_clear(void); // back to the procedural sky gradient
+
+// Draw distance, as a factor of RENDER_FADEOUT_FAR (1.0 = everything)
+void render_set_draw_distance(float factor);
+float render_draw_distance(void); // in world units
 void render_set_cull_backface(bool enabled);
 
 vec3_t render_transform(vec3_t pos);

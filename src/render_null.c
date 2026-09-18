@@ -23,6 +23,13 @@ void render_reset_viewport(void) {}
 void render_scene_post(float motion_blur) {
 	(void) motion_blur;
 }
+static float draw_distance_factor = 1.0;
+void render_set_draw_distance(float factor) {
+	draw_distance_factor = factor;
+}
+float render_draw_distance(void) {
+	return RENDER_FADEOUT_FAR * draw_distance_factor;
+}
 void render_env_begin(int face) {
 	(void) face;
 }
