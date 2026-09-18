@@ -1,3 +1,8 @@
+heavely modifie with ClaudeCode for VFX and 2players
+
+source to game files : https://archive.org/details/wipeout-pc-redump
+
+
 # wipEout Rewrite
 
 This is a re-implementation of the 1995 PSX game wipEout.
