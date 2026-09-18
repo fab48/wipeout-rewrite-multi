@@ -967,6 +967,9 @@ void game_init(void) {
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT);
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT);
 
+	// F3: compare with and without all the render effects
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_F3, A_TOGGLE_FX);
+
 	// The second gamepad can pause and navigate the menus, too
 	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_UP, A_MENU_UP);
 	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_DOWN, A_MENU_DOWN);
@@ -1039,6 +1042,19 @@ void game_update(void) {
 	if (fullscreen != save.fullscreen) {
 		save.fullscreen = fullscreen;
 		save.is_dirty = true;
+	}
+
+	// F3 toggles every render effect (post FX, lighting, point lights,
+	// tonemapping) without touching the save, to compare before/after
+	static bool fx_disabled = false;
+	if (input_pressed(A_TOGGLE_FX)) {
+		fx_disabled = !fx_disabled;
+		int kept = save.post_effect & (RENDER_POST_SPLIT_VERTICAL | RENDER_POST_SWAP_GAMEPADS | RENDER_POST_EXTERNAL_VIEW | RENDER_POST_DRAW_DISTANCE_MASK);
+		render_set_post_effect(fx_disabled ? (kept | RENDER_POST_NO_TONEMAP) : save.post_effect);
+	}
+	if (fx_disabled) {
+		render_set_view_2d();
+		ui_draw_text("FX OFF", ui_scaled_pos(UI_POS_TOP | UI_POS_CENTER, vec2i(-24, 4)), UI_SIZE_8, UI_COLOR_ACCENT);
 	}
 
 	if (save.is_dirty) {

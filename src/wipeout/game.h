@@ -57,6 +57,8 @@ typedef enum {
 	A_P2_THRUST,
 	A_P2_FIRE,
 	A_P2_CHANGE_VIEW,
+
+	A_TOGGLE_FX, // debug: all render effects on/off (F3)
 } action_t;
 
 #define MAX_PLAYERS 2
