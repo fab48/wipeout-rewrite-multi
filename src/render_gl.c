@@ -712,7 +712,7 @@ static GLuint backbuffer_depth_buffer = 0;
 
 #define BLOOM_TARGET_HEIGHT 256
 #define BLOOM_BLUR_PASSES 4
-#define BLOOM_INTENSITY 0.9
+#define BLOOM_INTENSITY 1.35
 #define BLOOM_BRIGHT_PASS 0.55
 
 #define MOTION_BLUR_STRENGTH 0.16
@@ -1119,7 +1119,7 @@ static void render_bloom(void) {
 
 	// Blur horizontally and vertically, with increasing spread
 	for (int i = 0; i < BLOOM_BLUR_PASSES; i++) {
-		float spread = (i + 1) * 1.4;
+		float spread = (i + 1) * 2.1;
 		render_post_pass(prg_bloom_blur, bloom_fbo[1], bloom_size, bloom_texture[0], vec2(spread / bloom_size.x, 0));
 		render_post_pass(prg_bloom_blur, bloom_fbo[0], bloom_size, bloom_texture[1], vec2(0, spread / bloom_size.y));
 	}
