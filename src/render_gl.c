@@ -154,13 +154,8 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 		v_normal = (view * vec4(normal, 0.0)).xyz;
 		v_up = (view * vec4(0.0, -1.0, 0.0, 0.0)).xyz;
 
-		// The light mostly follows the camera: it sits ahead of us, a bit to
-		// the side and above the horizon, so that we always get to see its 
-		// reflection on the track and the ships. A fixed world space sun is 
-		// mixed in, to have the lighting still change when we turn.
-		vec3 sun = (view * vec4(0.50, -0.58, 0.64, 0.0)).xyz;
-		vec3 follow = normalize(vec3(0.22, 0.0, -1.0) + v_up * 0.55);
-		v_light = mix(sun, follow, 0.75);
+		// Fixed sun, about 25 degrees above the horizon
+		v_light = (view * vec4(0.60, -0.42, 0.68, 0.0)).xyz;
 
 		gl_Position = projection * view_pos;
 		gl_Position.xy += screen.xy * gl_Position.w;
