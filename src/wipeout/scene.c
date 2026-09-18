@@ -215,7 +215,7 @@ void scene_draw(camera_t *camera) {
 	render_set_material(RENDER_MATERIAL_UNLIT);
 	render_set_blend_mode(RENDER_BLEND_LIGHTER);
 	render_set_depth_write(false);
-	render_set_depth_offset(-16.0);
+	render_set_depth_offset(-1.0); // just enough to win against the coplanar geometry; a large offset lets the glow show through the road in banked curves
 	for (int i = 0; i < start_booms_len; i++) {
 		object_draw_filtered(start_booms[i], &start_booms[i]->mat, PRM_GLOW, true);
 	}

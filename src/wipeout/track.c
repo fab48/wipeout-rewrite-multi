@@ -477,7 +477,7 @@ void track_draw(camera_t *camera) {
 	render_set_material(RENDER_MATERIAL_UNLIT);
 	render_set_blend_mode(RENDER_BLEND_LIGHTER);
 	render_set_depth_write(false);
-	render_set_depth_offset(-16.0);
+	render_set_depth_offset(-1.0); // just enough to win against the coplanar geometry; a large offset lets the glow show through the road in banked curves
 
 	uint8_t boost_alpha = 110; // keep the arrow readable
 	uint8_t pickup_alpha = 170 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 70;
