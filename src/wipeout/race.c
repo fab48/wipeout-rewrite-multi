@@ -168,6 +168,7 @@ void race_init(void) {
 	const circuit_settings_t *cs = &def.circuits[g.circuit].settings[g.race_class];
 	track_load(cs->path);
 	scene_load(cs->path, cs->sky_y_offset);
+	scene_render_sky_env();
 	
 	if (g.circuit == CIRCUIT_SILVERSTREAM && g.race_class == RACE_CLASS_RAPIER) {
 		scene_init_aurora_borealis();	

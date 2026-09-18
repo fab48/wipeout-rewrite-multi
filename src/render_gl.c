@@ -216,6 +216,9 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 	uniform float tonemap; // 1 = soft knee on the highlights
+	uniform samplerCube env; // the sky, for reflections
+	uniform mat4 view_inv; // view space -> world space (rotation only)
+	uniform float env_amount; // 0 = procedural sky gradient, 1 = cubemap
 	varying vec3 v_pointlight;
 	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2, negative = per pixel
 	uniform vec3 lights_color[6];
@@ -304,12 +307,16 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			// keep the ambient term high.
 			vec3 diffuse = albedo * (0.66 + 0.5 * ndl * sun) * (1.0 - metallic * 0.45);
 
-			// GGX specular, without the geometry term
+			// GGX specular, without the geometry term. The sun is treated as a
+			// large, soft disc (roughness at least 0.4), the sharp reflections
+			// come from the sky cubemap below.
 			float roughness = clamp(1.0 - smoothness, 0.08, 1.0);
 			float a = roughness * roughness;
 			float a2 = a * a;
-			float d = ndh * ndh * (a2 - 1.0) + 1.0;
-			float ggx = min(a2 / (3.14159 * d * d), 24.0);
+			float rs = max(roughness, 0.4);
+			float as2 = rs * rs * rs * rs;
+			float d = ndh * ndh * (as2 - 1.0) + 1.0;
+			float ggx = min(as2 / (3.14159 * d * d), 24.0);
 			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
 			vec3 specular = fresnel * ggx * 0.25 * ndl * sun;
 
@@ -348,6 +355,12 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			vec3 r = reflect(-v, n);
 			float up = dot(r, normalize(v_up));
 			vec3 env = mix(vec3(0.05, 0.05, 0.07), vec3(0.30, 0.38, 0.58), smoothstep(-0.1, 0.8, up));
+			if (env_amount > 0.5) {
+				// The real sky; blurrier the rougher the surface
+				vec3 r_world = (view_inv * vec4(r, 0.0)).xyz;
+				vec3 sky = textureCube(env, r_world, roughness * 6.0).rgb;
+				env = mix(env, sky * 1.1, 0.85);
+			}
 			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
 			vec3 reflection = env * env_fresnel * smoothness * (0.5 + metallic * 0.6);
 
@@ -394,6 +407,9 @@ typedef struct {
 		GLuint time;
 		GLuint material;
 		GLuint tonemap;
+		GLuint env;
+		GLuint view_inv;
+		GLuint env_amount;
 		GLuint lights_pos;
 		GLuint lights_color;
 		GLuint lights_len;
@@ -419,6 +435,9 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
 	s->uniform.tonemap = glGetUniformLocation(s->program, "tonemap");
+	s->uniform.env = glGetUniformLocation(s->program, "env");
+	s->uniform.view_inv = glGetUniformLocation(s->program, "view_inv");
+	s->uniform.env_amount = glGetUniformLocation(s->program, "env_amount");
 	s->uniform.lights_pos = glGetUniformLocation(s->program, "lights_pos");
 	s->uniform.lights_color = glGetUniformLocation(s->program, "lights_color");
 	s->uniform.lights_len = glGetUniformLocation(s->program, "lights_len");
@@ -734,6 +753,11 @@ static GLuint scratch_fbo = 0;
 static GLuint scratch_texture = 0;
 
 static bool bloom_enabled = false;
+
+#define ENV_SIZE 128
+static GLuint env_texture = 0;
+static GLuint env_fbo = 0;
+static mat4_t env_projection;
 static float bloom_threshold = 0.82;
 static vec2i_t bloom_size;
 static int bloom_downsample = 1;
@@ -823,6 +847,33 @@ void render_init(vec2i_t screen_size) {
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
 	glUniform1f(prg_game->uniform.lights_len, 0);
 	glUniform1f(prg_game->uniform.tonemap, 1.0);
+	glUniform1f(prg_game->uniform.env_amount, 0.0);
+	glUniformMatrix4fv(prg_game->uniform.view_inv, 1, false, mat4_identity().m);
+
+	// Sky reflection cubemap, on texture unit 1
+	glGenTextures(1, &env_texture);
+	glGenFramebuffers(1, &env_fbo);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, env_texture);
+	for (int face = 0; face < 6; face++) {
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA, ENV_SIZE, ENV_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	}
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(prg_game->uniform.env, 1);
+
+	// 90 degree square projection for the cube faces
+	float nf = 1.0 / (NEAR_PLANE - FAR_PLANE);
+	env_projection = mat4(
+		1, 0, 0, 0,
+		0, 1, 0, 0,
+		0, 0, (FAR_PLANE + NEAR_PLANE) * nf, -1,
+		0, 0, 2 * FAR_PLANE * NEAR_PLANE * nf, 0
+	);
 
 	render_set_view(vec3(0, 0, 0), vec3(0, 0, 0));
 	render_set_model_mat(&mat4_identity());
@@ -1251,6 +1302,15 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 	glUniformMatrix4fv(prg_game->uniform.view, 1, false, view_mat.m);
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, projection_mat_3d.m);
 	glUniform3f(prg_game->uniform.camera_pos, pos.x, pos.y, pos.z);
+
+	// Rotation part of the view matrix, transposed = inverted
+	mat4_t view_inv = mat4_identity();
+	for (int c = 0; c < 3; c++) {
+		for (int r = 0; r < 3; r++) {
+			view_inv.cols[c][r] = view_mat.cols[r][c];
+		}
+	}
+	glUniformMatrix4fv(prg_game->uniform.view_inv, 1, false, view_inv.m);
 	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
 	render_set_material(RENDER_MATERIAL_DEFAULT);
 	render_set_lights(NULL, 0);
@@ -1279,6 +1339,74 @@ void render_set_lights(render_light_t *lights, int len) {
 		glUniform3fv(prg_game->uniform.lights_color, len, color);
 	}
 	glUniform1f(prg_game->uniform.lights_len, len);
+}
+
+// Renders into one face of the sky cubemap. Standard lookAt cameras at the
+// origin, matching the GL cubemap conventions.
+void render_env_begin(int face) {
+	static const vec3_t forwards[6] = {
+		{ 1, 0, 0}, {-1, 0, 0}, {0,  1, 0}, {0, -1, 0}, {0, 0,  1}, {0, 0, -1}
+	};
+	static const vec3_t ups[6] = {
+		{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}
+	};
+
+	render_flush();
+	use_program(prg_game);
+
+	// Don't sample the cubemap while rendering into it
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	glUniform1f(prg_game->uniform.env_amount, 0.0);
+
+	vec3_t f = forwards[face];
+	vec3_t s = vec3_normalize(vec3_cross(f, ups[face]));
+	vec3_t u = vec3_cross(s, f);
+	view_mat = mat4(
+		s.x, u.x, -f.x, 0,
+		s.y, u.y, -f.y, 0,
+		s.z, u.z, -f.z, 0,
+		0, 0, 0, 1
+	);
+	glUniformMatrix4fv(prg_game->uniform.view, 1, false, view_mat.m);
+	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, env_projection.m);
+	glUniform3f(prg_game->uniform.camera_pos, 0, 0, 0);
+	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
+	glUniform2f(prg_game->uniform.screen, 0, 0);
+	render_set_model_mat(&mat4_identity());
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_lights(NULL, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, env_fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, env_texture, 0);
+	glViewport(0, 0, ENV_SIZE, ENV_SIZE);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(false);
+	glClearColor(0, 0, 0, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+}
+
+void render_env_end(void) {
+	render_flush();
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(true);
+	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
+	render_reset_viewport();
+}
+
+void render_env_finish(void) {
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, env_texture);
+	glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1f(prg_game->uniform.env_amount, 1.0);
+}
+
+void render_env_clear(void) {
+	render_flush();
+	glUniform1f(prg_game->uniform.env_amount, 0.0);
 }
 
 void render_set_view_2d(void) {

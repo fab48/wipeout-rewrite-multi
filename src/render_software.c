@@ -111,6 +111,12 @@ void render_scene_post(float motion_blur) {}
 // FIXME: split screen is not supported by the software renderer
 void render_set_viewport(vec2i_t pos, vec2i_t size) {}
 void render_reset_viewport(void) {}
+void render_env_begin(int face) {
+	(void) face;
+}
+void render_env_end(void) {}
+void render_env_finish(void) {}
+void render_env_clear(void) {}
 void render_set_lights(render_light_t *lights, int len) {
 	(void) lights;
 	(void) len;

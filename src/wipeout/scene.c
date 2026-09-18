@@ -151,6 +151,17 @@ void scene_update(void) {
 	}
 }
 
+// Draws the sky into the reflection cubemap, seen from the origin
+void scene_render_sky_env(void) {
+	mat4_set_translation(&sky_object->mat, sky_offset);
+	for (int face = 0; face < 6; face++) {
+		render_env_begin(face);
+		object_draw(sky_object, &sky_object->mat);
+		render_env_end();
+	}
+	render_env_finish();
+}
+
 void scene_draw(camera_t *camera) {
 	// Sky
 	render_set_material(RENDER_MATERIAL_UNLIT);

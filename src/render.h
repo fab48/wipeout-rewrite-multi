@@ -97,6 +97,13 @@ typedef struct {
 	bool per_pixel; // per pixel with specular (small lights) or per vertex diffuse (big ones)
 } render_light_t;
 void render_set_lights(render_light_t *lights, int len);
+
+// Environment (sky) reflection cubemap. Draw the sky between begin/end for
+// each of the 6 faces (GL order: +X -X +Y -Y +Z -Z), from the origin.
+void render_env_begin(int face);
+void render_env_end(void);
+void render_env_finish(void); // after the last face; enables the reflection
+void render_env_clear(void); // back to the procedural sky gradient
 void render_set_cull_backface(bool enabled);
 
 vec3_t render_transform(vec3_t pos);
