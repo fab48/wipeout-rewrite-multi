@@ -356,10 +356,12 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			float up = dot(r, normalize(v_up));
 			vec3 env = mix(vec3(0.05, 0.05, 0.07), vec3(0.30, 0.38, 0.58), smoothstep(-0.1, 0.8, up));
 			if (env_amount > 0.5) {
-				// The real sky; blurrier the rougher the surface
+				// The real sky. No lod bias here (not available everywhere in
+				// GLSL ES 1.0); rough surfaces blend back towards the flat
+				// gradient instead, which blurs the reflection away.
 				vec3 r_world = (view_inv * vec4(r, 0.0)).xyz;
-				vec3 sky = textureCube(env, r_world, roughness * 6.0).rgb;
-				env = mix(env, sky * 1.1, 0.85);
+				vec3 sky = textureCube(env, r_world).rgb;
+				env = mix(env, sky * 1.1, 0.85 * (1.0 - roughness * 0.7));
 			}
 			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow(1.0 - ndv, 5.0);
 			vec3 reflection = env * env_fresnel * smoothness * (0.5 + metallic * 0.6);
