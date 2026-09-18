@@ -81,6 +81,7 @@ typedef struct track_t {
 
 
 void track_load(const char *base_path);
+void track_compute_smooth_normals(void);
 ttf_t *track_load_tile_format(char *ttf_name);
 vec3_t *track_load_vertices(char *file);
 void track_load_faces(char *file, vec3_t *vertices);

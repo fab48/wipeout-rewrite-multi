@@ -1,3 +1,4 @@
+#include <string.h>
 #include "../mem.h"
 #include "../utils.h"
 #include "../render.h"
@@ -205,6 +206,99 @@ void track_load_faces(char *file_name, vec3_t *vertices) {
 	}
 
 	mem_temp_free(bytes);
+	track_compute_smooth_normals();
+}
+
+// Per vertex normals for the lighting: the average of the normals of all faces
+// that share a vertex position, but only of faces that are roughly coplanar.
+// Sharp edges (road to wall) stay sharp, the road surface itself becomes
+// smooth across the polygons.
+#define SMOOTH_NORMALS_HASH_SIZE 16384
+#define SMOOTH_NORMALS_MAX_FACES 8
+#define SMOOTH_NORMALS_MIN_DOT 0.6
+
+typedef struct {
+	vec3_t pos;
+	int count;
+	vec3_t normals[SMOOTH_NORMALS_MAX_FACES];
+} smooth_normal_entry_t;
+
+static uint32_t smooth_normal_hash(vec3_t pos) {
+	int32_t x = (int32_t)pos.x, y = (int32_t)pos.y, z = (int32_t)pos.z;
+	uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u ^ (uint32_t)z * 83492791u;
+	return h & (SMOOTH_NORMALS_HASH_SIZE - 1);
+}
+
+static smooth_normal_entry_t *smooth_normal_find(smooth_normal_entry_t *table, vec3_t pos, bool create) {
+	uint32_t i = smooth_normal_hash(pos);
+	for (int probe = 0; probe < SMOOTH_NORMALS_HASH_SIZE; probe++) {
+		smooth_normal_entry_t *e = &table[i];
+		if (e->count == 0) {
+			if (!create) {
+				return NULL;
+			}
+			e->pos = pos;
+			return e;
+		}
+		if (e->pos.x == pos.x && e->pos.y == pos.y && e->pos.z == pos.z) {
+			return e;
+		}
+		i = (i + 1) & (SMOOTH_NORMALS_HASH_SIZE - 1);
+	}
+	return NULL;
+}
+
+void track_compute_smooth_normals(void) {
+	smooth_normal_entry_t *table = mem_temp_alloc(sizeof(smooth_normal_entry_t) * SMOOTH_NORMALS_HASH_SIZE);
+	memset(table, 0, sizeof(smooth_normal_entry_t) * SMOOTH_NORMALS_HASH_SIZE);
+
+	// Collect the face normals at each vertex position. The two tris of a face
+	// share its normal, so only the first tri adds it.
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		for (int t = 0; t < 2; t++) {
+			for (int v = 0; v < 3; v++) {
+				smooth_normal_entry_t *e = smooth_normal_find(table, face->tris[t].vertices[v].pos, true);
+				if (!e || e->count >= SMOOTH_NORMALS_MAX_FACES) {
+					continue;
+				}
+				bool have = false;
+				if (t == 1) {
+					for (int k = 0; k < e->count; k++) {
+						if (vec3_len(vec3_sub(e->normals[k], face->normal)) < 0.0001) {
+							have = true;
+						}
+					}
+				}
+				if (!have) {
+					e->normals[e->count++] = face->normal;
+				}
+			}
+		}
+	}
+
+	// Average the compatible ones
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		for (int t = 0; t < 2; t++) {
+			for (int v = 0; v < 3; v++) {
+				vertex_t *vertex = &face->tris[t].vertices[v];
+				vec3_t sum = face->normal;
+				smooth_normal_entry_t *e = smooth_normal_find(table, vertex->pos, false);
+				if (e) {
+					for (int k = 0; k < e->count; k++) {
+						if (vec3_dot(e->normals[k], face->normal) > SMOOTH_NORMALS_MIN_DOT) {
+							sum = vec3_add(sum, e->normals[k]);
+						}
+					}
+				}
+				float len = vec3_len(sum);
+				vertex->normal = len > 0.0001 ? vec3_mulf(sum, 1.0 / len) : face->normal;
+			}
+		}
+	}
+
+	mem_temp_free(table);
 }
 
 void track_load_texture_file(char *tex_path) {

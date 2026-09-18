@@ -131,10 +131,12 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	attribute vec3 pos;
 	attribute vec2 uv;
 	attribute vec4 color;
+	attribute vec3 normal;
 
 	varying vec4 v_color;
 	varying vec2 v_uv;
 	varying vec3 v_pos;
+	varying vec3 v_normal;
 	varying vec3 v_light;
 	varying vec3 v_up;
 	uniform mat4 view;
@@ -149,6 +151,7 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 		// Everything for the lighting is in view space. -Y is up.
 		vec4 view_pos = view * model * vec4(pos, 1.0);
 		v_pos = view_pos.xyz;
+		v_normal = (view * vec4(normal, 0.0)).xyz;
 		v_up = (view * vec4(0.0, -1.0, 0.0, 0.0)).xyz;
 
 		// The light mostly follows the camera: it sits ahead of us, a bit to
@@ -174,16 +177,19 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec4 v_color;
 	varying vec2 v_uv;
 	varying vec3 v_pos;
+	varying vec3 v_normal;
 	varying vec3 v_light;
 	varying vec3 v_up;
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 
 	void main(void) {
-		// Flat face normal from the view space position; only when lit
+		// Smooth vertex normal if the geometry has one, otherwise a flat face
+		// normal from the view space position; only when lit
 		vec3 face = vec3(0.0);
+		bool has_vertex_normal = dot(v_normal, v_normal) > 0.25;
 		if (material.w > 0.5) {
-			face = cross(dFdx(v_pos), dFdy(v_pos));
+			face = has_vertex_normal ? v_normal : cross(dFdx(v_pos), dFdy(v_pos));
 		}
 
 		vec4 tex_color = texture2D(texture, v_uv);
@@ -212,7 +218,9 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			if (material.w > 1.5) {
 				vec3 up_n = normalize(v_up);
 				float flatten = smoothstep(0.5, 0.9, dot(n, up_n));
-				n = normalize(mix(n, up_n, flatten * 0.94));
+				if (!has_vertex_normal) {
+					n = normalize(mix(n, up_n, flatten * 0.94));
+				}
 
 				// Fade the reflections on the road surface out with distance;
 				// they look odd when seen from far away or high up
@@ -281,6 +289,14 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			float emissive = smoothstep(0.72, 1.0, brightness) * material.z;
 			color.rgb = mix(lit, albedo * 1.3, emissive);
 		}
+
+		// Soft knee on the highlights: everything above 0.75 is compressed
+		// smoothly instead of clipping to white. Leaves some headroom for the
+		// bloom and keeps the color of bright, saturated pixels.
+		vec3 knee = vec3(0.75);
+		vec3 over = max(color.rgb - knee, vec3(0.0));
+		color.rgb = min(color.rgb, knee) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+
 		gl_FragColor = color;
 	}
 );
@@ -302,6 +318,7 @@ typedef struct {
 		GLuint pos;
 		GLuint uv;
 		GLuint color;
+		GLuint normal;
 	} attribute;
 } prg_game_t;
 
@@ -321,6 +338,7 @@ prg_game_t *shader_game_init(void) {
 	s->attribute.pos = glGetAttribLocation(s->program, "pos");
 	s->attribute.uv = glGetAttribLocation(s->program, "uv");
 	s->attribute.color = glGetAttribLocation(s->program, "color");
+	s->attribute.normal = glGetAttribLocation(s->program, "normal");
 
 	glGenVertexArrays(1, &s->vao);
 	glBindVertexArray(s->vao);
@@ -328,6 +346,8 @@ prg_game_t *shader_game_init(void) {
 	glEnableVertexAttribArray(s->attribute.pos);
 	glEnableVertexAttribArray(s->attribute.uv);
 	glEnableVertexAttribArray(s->attribute.color);
+	glEnableVertexAttribArray(s->attribute.normal);
+	bind_va_f(s->attribute.normal, vertex_t, normal, 0);
 
 	bind_va_f(s->attribute.pos, vertex_t, pos, 0);
 	bind_va_f(s->attribute.uv, vertex_t, uv, 0);
@@ -1001,9 +1021,10 @@ static void render_bloom(void) {
 		render_post_pass(prg_bloom_blur, bloom_fbo[0], bloom_size, bloom_texture[1], vec2(0, spread / bloom_size.y));
 	}
 
-	// Add the result on top of the backbuffer
+	// Combine the result with the backbuffer using a "screen" blend
+	// (1 - (1-a)(1-b)): like an add, but it never clips to white
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE, GL_ONE);
+	glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ONE);
 	render_post_pass(prg_bloom_composite, backbuffer, backbuffer_size, bloom_texture[0], vec2(BLOOM_INTENSITY, 0));
 	render_apply_blend_mode();
 }
