@@ -734,7 +734,7 @@ static GLuint backbuffer_depth_buffer = 0;
 
 #define BLOOM_TARGET_HEIGHT 256
 #define BLOOM_BLUR_PASSES 4
-#define BLOOM_INTENSITY 1.8
+#define BLOOM_INTENSITY 2.5
 #define BLOOM_BRIGHT_PASS 0.55
 
 #define MOTION_BLUR_STRENGTH 0.16
