@@ -189,7 +189,7 @@ static void scene_draw_light_halos(Object *obj) {
 
 void scene_draw(camera_t *camera) {
 	// Sky
-	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_material(RENDER_MATERIAL_SKY);
 	render_set_depth_write(false);
 	mat4_set_translation(&sky_object->mat, vec3_add(camera->position, sky_offset));
 	object_draw(sky_object, &sky_object->mat);

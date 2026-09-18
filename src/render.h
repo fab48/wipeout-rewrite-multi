@@ -45,6 +45,7 @@ typedef enum {
 	RENDER_MATERIAL_TRACK,
 	RENDER_MATERIAL_SCENE,
 	RENDER_MATERIAL_SHIP,
+	RENDER_MATERIAL_SKY, // unlit; marked in the bloom mask so the sky blooms less
 	NUM_RENDER_MATERIALS,
 } render_material_t;
 

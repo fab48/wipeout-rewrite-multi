@@ -390,6 +390,12 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			color.rgb = mix(lit, albedo * 1.3, emissive);
 		}
 
+		// The sky writes a marker (alpha 0.5) into the bloom mask channel; the
+		// bloom extraction tones it down
+		if (material.z < -0.5) {
+			color.a = 0.5;
+		}
+
 		// Soft knee on the highlights: everything above 0.75 is compressed
 		// smoothly instead of clipping to white. Leaves some headroom for the
 		// bloom and keeps the color of bright, saturated pixels.
@@ -529,7 +535,11 @@ static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
 		float saturation = (brightness - darkest) / max(brightness, 0.001);
 		// param_bright.x: overbright pixels, param_bright.y: only saturated ones
 		float bright_pass = smoothstep(param_threshold, 1.0, brightness) * (param_bright.x + param_bright.y * smoothstep(0.7, 0.95, saturation));
-		gl_FragColor = vec4(color.rgb * min(color.a + bright_pass, 1.0), 1.0);
+		// alpha == 0.5 marks the sky: no mask, and 3x less bright pass
+		float sky = 1.0 - smoothstep(0.03, 0.08, abs(color.a - 0.5));
+		float mask = color.a * (1.0 - sky);
+		bright_pass *= mix(1.0, 0.33, sky);
+		gl_FragColor = vec4(color.rgb * min(mask + bright_pass, 1.0), 1.0);
 	}
 );
 
@@ -756,6 +766,7 @@ static const float material_params[NUM_RENDER_MATERIALS][3] = {
 	[RENDER_MATERIAL_TRACK]   = {0.0, 0.75, 0.6},
 	[RENDER_MATERIAL_SCENE]   = {0.0, 0.3, 1.0},
 	[RENDER_MATERIAL_SHIP]    = {0.9, 0.86, 0.7},
+	[RENDER_MATERIAL_SKY]     = {0.0, 0.0, -1.0}, // z < 0 marks the sky in the shader
 };
 
 static bool motion_blur_enabled = false;
@@ -1506,6 +1517,7 @@ void render_set_material(render_material_t new_material) {
 
 	material = new_material;
 	render_apply_material();
+	render_apply_blend_mode();
 }
 
 static void render_apply_material(void) {
@@ -1513,6 +1525,7 @@ static void render_apply_material(void) {
 	bool lit = (
 		lighting_enabled &&
 		material != RENDER_MATERIAL_UNLIT &&
+		material != RENDER_MATERIAL_SKY &&
 		blend_mode == RENDER_BLEND_NORMAL
 	);
 	const float *params = material_params[material];
@@ -1527,7 +1540,11 @@ static void render_apply_material(void) {
 // The alpha channel of the backbuffer is used as the bloom mask: additive
 // drawing accumulates alpha, normal drawing on top of it removes it again.
 static void render_apply_blend_mode(void) {
-	if (blend_mode == RENDER_BLEND_NORMAL) {
+	if (blend_mode == RENDER_BLEND_NORMAL && material == RENDER_MATERIAL_SKY) {
+		// The sky is opaque and drawn first; write its marker alpha (0.5) as is
+		glBlendFuncSeparate(GL_ONE, GL_ZERO, GL_ONE, GL_ZERO);
+	}
+	else if (blend_mode == RENDER_BLEND_NORMAL) {
 		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
 	}
 	else if (blend_mode == RENDER_BLEND_LIGHTER) {
