@@ -138,6 +138,7 @@ typedef struct ship_t {
 	} exhaust_plume[3];
 	float exhaust_intensity;
 	float exhaust_len;
+	float turbo_timer; // > 0 while the turbo pickup is kicking
 	float exhaust_trail_timer;
 	bool exhaust_trail_valid;
 

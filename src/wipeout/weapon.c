@@ -306,6 +306,39 @@ void weapons_draw(void) {
 			object_draw(weapon->model, &mat);
 		}
 	}
+
+	// Flares on the projectiles: an orange exhaust on rockets and missiles, a
+	// crackling blue-white core on the e-bolt
+	render_set_model_mat(&mat4_identity());
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-32.0);
+	uint16_t flare = ship_exhaust_flare_texture();
+
+	for (int i = 0; i < weapons_active; i++) {
+		weapon_t *weapon = &weapons[i];
+		if (!weapon->model) {
+			continue;
+		}
+		if (weapon->model == weapon_assets.rocket || weapon->model == weapon_assets.missile) {
+			float speed = vec3_len(weapon->velocity);
+			vec3_t back = speed > 0.001 ? vec3_mulf(weapon->velocity, -110.0 / speed) : vec3(0, 0, 0);
+			vec3_t tail = vec3_add(weapon->position, back);
+			int size = 200 * rand_float(0.85, 1.15);
+			render_push_sprite(tail, vec2i(size, size), rgba(128, 60, 16, 255), flare);
+			render_push_sprite(tail, vec2i(size * 0.45, size * 0.45), rgba(128, 110, 70, 255), flare);
+		}
+		else if (weapon->model == weapon_assets.ebolt) {
+			int size = 260 * rand_float(0.7, 1.3);
+			render_push_sprite(weapon->position, vec2i(size, size), rgba(40, 90, 128, 255), flare);
+			render_push_sprite(weapon->position, vec2i(size * 0.4, size * 0.4), rgba(110, 128, 128, 255), flare);
+		}
+	}
+
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
 }
 
 
@@ -648,6 +681,14 @@ void weapon_update_shield(weapon_t *self) {
 
 void weapon_fire_turbo(ship_t *ship) {
 	ship->velocity = vec3_add(ship->velocity, vec3_mulf(ship->mat.basis.forward.vec3, 39321)); // unitVecNose.vx) << 3) * FR60) / 50
+	ship->turbo_timer = 1.4;
+
+	// A blue-white flash from the engines
+	vec3_t pos;
+	float intensity;
+	if (ship_exhaust_light(ship, &pos, &intensity)) {
+		race_add_flash_light(pos, PARTICLE_TYPE_EBOLT);
+	}
 	
 	if (ship_is_player(ship)) {
 		sfx_t *sfx = sfx_play(SFX_MISSILE_FIRE);

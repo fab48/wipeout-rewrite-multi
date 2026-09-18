@@ -540,7 +540,8 @@ void ship_draw_exhaust_plume(ship_t *self) {
 }
 
 static void ship_draw_exhaust_trail(ship_t *self, vec3_t *trail) {
-	float intensity = 0.25 + 0.75 * self->exhaust_intensity;
+	float intensity = 0.25 + 0.75 * min(self->exhaust_intensity, 1.0);
+	float turbo = max(self->exhaust_intensity - 1.0, 0.0); // 0..0.6 during the turbo
 	vec3_t side = vec3(0, 0, 0);
 
 	vec3_t prev_pos[3];
@@ -566,14 +567,17 @@ static void ship_draw_exhaust_trail(ship_t *self, vec3_t *trail) {
 		// Fade in over the first few points, so the trail doesn't start as a 
 		// hard edge right at the nozzle
 		float fade = (1.0 - t) * (1.0 - t) * min(1.0, i / 3.0);
-		float width = 14.0 + 34.0 * (1.0 - t);
+		float width = (14.0 + 34.0 * (1.0 - t)) * (1.0 + turbo * 1.2);
 
 		vec3_t pos[3] = {
 			vec3_sub(trail[i], vec3_mulf(side, width)),
 			trail[i],
 			vec3_add(trail[i], vec3_mulf(side, width))
 		};
-		rgba_t color[3] = {exhaust_trail_color, exhaust_trail_color, exhaust_trail_color};
+		rgba_t trail_color = exhaust_trail_color;
+		trail_color.r = min(255, trail_color.r + (int)(turbo * 200));
+		trail_color.g = min(255, trail_color.g + (int)(turbo * 160));
+		rgba_t color[3] = {trail_color, trail_color, trail_color};
 		color[0].a = 0;
 		color[1].a = 255 * fade * intensity;
 		color[2].a = 0;
@@ -679,6 +683,10 @@ static void ship_update_exhaust_trail(ship_t *self) {
 	float target = 1.0;
 	if (ship_is_player(self) && self->thrust_max > 0) {
 		target = clamp(self->thrust_mag / self->thrust_max, 0.0, 1.0);
+	}
+	if (self->turbo_timer > 0) {
+		self->turbo_timer -= system_tick();
+		target = 1.6;
 	}
 	self->exhaust_intensity += (target - self->exhaust_intensity) * min(1.0, system_tick() * 8.0);
 
@@ -826,6 +834,10 @@ void ship_update(ship_t *self) {
 	else {
 		// for remote ships the z exhaust_len is a constant
 		exhaust_len = 150;
+	}
+
+	if (self->turbo_timer > 0) {
+		exhaust_len *= 1.8;
 	}
 
 	for (int i = 0; i < 3; i++) {
