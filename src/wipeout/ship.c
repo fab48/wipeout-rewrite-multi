@@ -649,6 +649,27 @@ void ship_draw_exhaust_glow(ship_t *self) {
 	}
 }
 
+// Position and brightness of the light emitted by the exhaust flares
+bool ship_exhaust_light(ship_t *self, vec3_t *pos, float *intensity) {
+	if (!self->exhaust_trail_valid) {
+		return false;
+	}
+	vec3_t sum = vec3(0, 0, 0);
+	int engines = 0;
+	for (int i = 0; i < 3; i++) {
+		if (self->exhaust_plume[i].v) {
+			sum = vec3_add(sum, self->exhaust_plume[i].trail[0]);
+			engines++;
+		}
+	}
+	if (engines == 0) {
+		return false;
+	}
+	*pos = vec3_mulf(sum, 1.0 / engines);
+	*intensity = 0.5 + 0.5 * self->exhaust_intensity;
+	return true;
+}
+
 static void ship_update_exhaust_trail(ship_t *self) {
 	float target = 1.0;
 	if (ship_is_player(self) && self->thrust_max > 0) {

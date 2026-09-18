@@ -431,12 +431,99 @@ Object *objects_load(char *name, texture_list_t tl) {
 			prm.f3->type = prm_type;
 			prm.f3->flag = prm_flag;
 		} // each prim
+
+		object_compute_smooth_normals(object);
 	} // each object
 
 	mem_temp_free(bytes);
 	return objectList;
 }
 
+
+// Smooth per vertex normals: the (area weighted) average of the normals of
+// all faces around a vertex. Whether a face actually uses the smooth normal
+// or its own flat one is decided per face when drawing, depending on the
+// angle between the two (see object_vertex_normal()).
+void object_compute_smooth_normals(Object *object) {
+	object->smooth_normals = mem_bump(object->vertices_len * sizeof(vec3_t));
+	for (int i = 0; i < object->vertices_len; i++) {
+		object->smooth_normals[i] = vec3(0, 0, 0);
+	}
+
+	Prm poly = {.primitive = object->primitives};
+	for (int i = 0; i < object->primitives_len; i++) {
+		int16_t *coords = NULL;
+		int num_coords = 0;
+		switch (poly.primitive->type) {
+		case PRM_TYPE_F3: coords = poly.f3->coords; num_coords = 3; poly.f3++; break;
+		case PRM_TYPE_FT3: coords = poly.ft3->coords; num_coords = 3; poly.ft3++; break;
+		case PRM_TYPE_G3: coords = poly.g3->coords; num_coords = 3; poly.g3++; break;
+		case PRM_TYPE_GT3: coords = poly.gt3->coords; num_coords = 3; poly.gt3++; break;
+		case PRM_TYPE_F4: coords = poly.f4->coords; num_coords = 4; poly.f4++; break;
+		case PRM_TYPE_FT4: coords = poly.ft4->coords; num_coords = 4; poly.ft4++; break;
+		case PRM_TYPE_G4: coords = poly.g4->coords; num_coords = 4; poly.g4++; break;
+		case PRM_TYPE_GT4: coords = poly.gt4->coords; num_coords = 4; poly.gt4++; break;
+		case PRM_TYPE_TSPR:
+		case PRM_TYPE_BSPR: poly.spr++; break;
+		default:
+			// Unknown primitive; we can't skip over it, so stop here
+			i = object->primitives_len;
+			break;
+		}
+		if (!coords) {
+			continue;
+		}
+
+		bool valid = true;
+		for (int j = 0; j < num_coords; j++) {
+			if (coords[j] < 0 || coords[j] >= object->vertices_len) {
+				valid = false;
+			}
+		}
+		if (!valid) {
+			continue;
+		}
+
+		// Not normalized: the length is the area of the face, which weights it
+		vec3_t a = object->vertices[coords[0]];
+		vec3_t b = object->vertices[coords[1]];
+		vec3_t c = object->vertices[coords[2]];
+		vec3_t face_normal = vec3_cross(vec3_sub(b, a), vec3_sub(c, a));
+		for (int j = 0; j < num_coords; j++) {
+			object->smooth_normals[coords[j]] = vec3_add(object->smooth_normals[coords[j]], face_normal);
+		}
+	}
+
+	for (int i = 0; i < object->vertices_len; i++) {
+		float len = vec3_len(object->smooth_normals[i]);
+		if (len > 0.0001) {
+			object->smooth_normals[i] = vec3_mulf(object->smooth_normals[i], 1.0 / len);
+		}
+	}
+}
+
+// Edges sharper than this angle stay sharp
+#define OBJECT_SMOOTH_MAX_ANGLE_COS 0.5 // 60 degrees
+
+static inline vec3_t object_vertex_normal(Object *object, int coord, vec3_t face_normal) {
+	if (!object->smooth_normals) {
+		return face_normal;
+	}
+	vec3_t smooth = object->smooth_normals[coord];
+	if (fabsf(vec3_dot(smooth, face_normal)) < OBJECT_SMOOTH_MAX_ANGLE_COS) {
+		return face_normal;
+	}
+	// Keep the orientation of the face; the shader flips it towards the viewer
+	return vec3_dot(smooth, face_normal) < 0 ? vec3_mulf(smooth, -1) : smooth;
+}
+
+static inline vec3_t object_face_normal(vec3_t a, vec3_t b, vec3_t c) {
+	vec3_t n = vec3_cross(vec3_sub(b, a), vec3_sub(c, a));
+	float len = vec3_len(n);
+	return len > 0.0001 ? vec3_mulf(n, 1.0 / len) : vec3(0, 0, 0);
+}
+
+#define ON(COORD, A, B, C) object_vertex_normal(object, COORD, object_face_normal(vertex[A], vertex[B], vertex[C]))
 
 void object_draw(Object *object, mat4_t *mat) {
 	object_draw_filtered(object, mat, 0, false);
@@ -488,16 +575,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.uv = {poly.gt3->u2, poly.gt3->v2},
 						.color = poly.gt3->color[2]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.uv = {poly.gt3->u1, poly.gt3->v1},
 						.color = poly.gt3->color[1]
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.uv = {poly.gt3->u0, poly.gt3->v0},
 						.color = poly.gt3->color[0]
 					},
@@ -517,16 +607,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.uv = {poly.gt4->u2, poly.gt4->v2},
 						.color = poly.gt4->color[2]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.uv = {poly.gt4->u1, poly.gt4->v1},
 						.color = poly.gt4->color[1]
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.uv = {poly.gt4->u0, poly.gt4->v0},
 						.color = poly.gt4->color[0]
 					},
@@ -536,16 +629,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord3, coord1),
 						.uv = {poly.gt4->u2, poly.gt4->v2},
 						.color = poly.gt4->color[2]
 					},
 					{
 						.pos = vertex[coord3],
+						.normal = ON(coord3, coord2, coord3, coord1),
 						.uv = {poly.gt4->u3, poly.gt4->v3},
 						.color = poly.gt4->color[3]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord3, coord1),
 						.uv = {poly.gt4->u1, poly.gt4->v1},
 						.color = poly.gt4->color[1]
 					},
@@ -564,16 +660,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.uv = {poly.ft3->u2, poly.ft3->v2},
 						.color = poly.ft3->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.uv = {poly.ft3->u1, poly.ft3->v1},
 						.color = poly.ft3->color
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.uv = {poly.ft3->u0, poly.ft3->v0},
 						.color = poly.ft3->color
 					},
@@ -593,16 +692,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.uv = {poly.ft4->u2, poly.ft4->v2},
 						.color = poly.ft4->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.uv = {poly.ft4->u1, poly.ft4->v1},
 						.color = poly.ft4->color
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.uv = {poly.ft4->u0, poly.ft4->v0},
 						.color = poly.ft4->color
 					},
@@ -612,16 +714,19 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord3, coord1),
 						.uv = {poly.ft4->u2, poly.ft4->v2},
 						.color = poly.ft4->color
 					},
 					{
 						.pos = vertex[coord3],
+						.normal = ON(coord3, coord2, coord3, coord1),
 						.uv = {poly.ft4->u3, poly.ft4->v3},
 						.color = poly.ft4->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord3, coord1),
 						.uv = {poly.ft4->u1, poly.ft4->v1},
 						.color = poly.ft4->color
 					},
@@ -640,14 +745,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.color = poly.g3->color[2]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.color = poly.g3->color[1]
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.color = poly.g3->color[0]
 					},
 				}
@@ -666,14 +774,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.color = poly.g4->color[2]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.color = poly.g4->color[1]
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.color = poly.g4->color[0]
 					},
 				}
@@ -682,14 +793,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord3, coord1),
 						.color = poly.g4->color[2]
 					},
 					{
 						.pos = vertex[coord3],
+						.normal = ON(coord3, coord2, coord3, coord1),
 						.color = poly.g4->color[3]
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord3, coord1),
 						.color = poly.g4->color[1]
 					},
 				}
@@ -707,14 +821,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.color = poly.f3->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.color = poly.f3->color
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.color = poly.f3->color
 					},
 				}
@@ -733,14 +850,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord1, coord0),
 						.color = poly.f4->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord1, coord0),
 						.color = poly.f4->color
 					},
 					{
 						.pos = vertex[coord0],
+						.normal = ON(coord0, coord2, coord1, coord0),
 						.color = poly.f4->color
 					},
 				}
@@ -749,14 +869,17 @@ void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool w
 				.vertices = {
 					{
 						.pos = vertex[coord2],
+						.normal = ON(coord2, coord2, coord3, coord1),
 						.color = poly.f4->color
 					},
 					{
 						.pos = vertex[coord3],
+						.normal = ON(coord3, coord2, coord3, coord1),
 						.color = poly.f4->color
 					},
 					{
 						.pos = vertex[coord1],
+						.normal = ON(coord1, coord2, coord3, coord1),
 						.color = poly.f4->color
 					},
 				}

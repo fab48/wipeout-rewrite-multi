@@ -166,6 +166,7 @@ void ship_reset_exhaust_plume(ship_t *self);
 void ship_draw(ship_t *self);
 void ship_draw_exhaust_plume(ship_t *self);
 void ship_draw_exhaust_glow(ship_t *self);
+bool ship_exhaust_light(ship_t *self, vec3_t *pos, float *intensity);
 void ship_draw_shadow(ship_t *self);
 void ship_update(ship_t *self);
 void ship_collide_with_track(ship_t *self, track_face_t *face);

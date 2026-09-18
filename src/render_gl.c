@@ -182,6 +182,9 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec3 v_up;
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
+	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2
+	uniform vec3 lights_color[6];
+	uniform int lights_len;
 
 	void main(void) {
 		// Smooth vertex normal if the geometry has one, otherwise a flat face
@@ -275,6 +278,29 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
 			vec3 specular = fresnel * ggx * 0.25 * ndl * sun;
 
+			// Point lights (the engine flares of the ships)
+			for (int i = 0; i < 6; i++) {
+				if (i >= lights_len) {
+					break;
+				}
+				vec3 to_light = lights_pos[i].xyz - v_pos;
+				float dist_sq = dot(to_light, to_light);
+				float falloff = clamp(1.0 - dist_sq * lights_pos[i].w, 0.0, 1.0);
+				float attenuation = falloff * falloff / (1.0 + dist_sq * lights_pos[i].w * 8.0);
+				if (attenuation <= 0.0) {
+					continue;
+				}
+				vec3 li = to_light * inversesqrt(max(dist_sq, 1.0));
+				vec3 hi = normalize(li + v);
+				float ndli = max(dot(n, li), 0.0);
+				float ndhi = max(dot(n, hi), 0.0);
+				float di = ndhi * ndhi * (a2 - 1.0) + 1.0;
+				float ggxi = min(a2 / (3.14159 * di * di), 24.0);
+				vec3 radiance = lights_color[i] * attenuation;
+				diffuse += albedo * radiance * ndli * (1.0 - metallic * 0.45);
+				specular += f0 * ggxi * 0.25 * ndli * radiance;
+			}
+
 			// Fake environment reflection: a sky/ground gradient
 			vec3 r = reflect(-v, n);
 			float up = dot(r, normalize(v_up));
@@ -287,6 +313,15 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			// Overbright texels (signs, lights, markers) are emissive
 			float brightness = max(tex_color.r, max(tex_color.g, tex_color.b));
 			float emissive = smoothstep(0.72, 1.0, brightness) * material.z;
+
+			// So are overbright, saturated vertex colors on scene objects (the
+			// start lights, beacons). Normal vertex colors stay below 0.5.
+			if (material.z > 0.9) {
+				float vc_max = max(v_color.r, max(v_color.g, v_color.b));
+				float vc_min = min(v_color.r, min(v_color.g, v_color.b));
+				float vc_sat = (vc_max - vc_min) / max(vc_max, 0.001);
+				emissive = max(emissive, smoothstep(0.6, 0.95, vc_max) * smoothstep(0.6, 0.9, vc_sat));
+			}
 			color.rgb = mix(lit, albedo * 1.3, emissive);
 		}
 
@@ -313,6 +348,9 @@ typedef struct {
 		GLuint fade;
 		GLuint time;
 		GLuint material;
+		GLuint lights_pos;
+		GLuint lights_color;
+		GLuint lights_len;
 	} uniform;
 	struct {
 		GLuint pos;
@@ -334,6 +372,9 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.camera_pos = glGetUniformLocation(s->program, "camera_pos");
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
+	s->uniform.lights_pos = glGetUniformLocation(s->program, "lights_pos");
+	s->uniform.lights_color = glGetUniformLocation(s->program, "lights_color");
+	s->uniform.lights_len = glGetUniformLocation(s->program, "lights_len");
 
 	s->attribute.pos = glGetAttribLocation(s->program, "pos");
 	s->attribute.uv = glGetAttribLocation(s->program, "uv");
@@ -397,7 +438,7 @@ static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
 
 	uniform sampler2D texture;
 	uniform vec2 param; // downsample tap offset
-	uniform float param_bright; // amount of overbright pixels to let through
+	uniform vec2 param_bright; // amount of overbright pixels to let through
 
 	void main(void) {
 		vec4 color = (
@@ -407,7 +448,10 @@ static const char * const SHADER_POST_FS_BLOOM_EXTRACT = SHADER_SOURCE(
 			texture2D(texture, v_uv + param * vec2( 1.0,  1.0))
 		) * 0.25;
 		float brightness = max(color.r, max(color.g, color.b));
-		float bright_pass = smoothstep(0.82, 1.0, brightness) * param_bright;
+		float darkest = min(color.r, min(color.g, color.b));
+		float saturation = (brightness - darkest) / max(brightness, 0.001);
+		// param_bright.x: overbright pixels, param_bright.y: only saturated ones
+		float bright_pass = smoothstep(0.82, 1.0, brightness) * (param_bright.x + param_bright.y * smoothstep(0.7, 0.95, saturation));
 		gl_FragColor = vec4(color.rgb * min(color.a + bright_pass, 1.0), 1.0);
 	}
 );
@@ -726,6 +770,7 @@ void render_init(vec2i_t screen_size) {
 	prg_game = shader_game_init();
 	use_program(prg_game);
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
+	glUniform1i(prg_game->uniform.lights_len, 0);
 
 	render_set_view(vec3(0, 0, 0), vec3(0, 0, 0));
 	render_set_model_mat(&mat4_identity());
@@ -1007,7 +1052,7 @@ static void render_bloom(void) {
 	// Only let overbright pixels (emissive, specular highlights) bloom when the
 	// lighting is enabled
 	glUseProgram(prg_bloom_extract->program);
-	glUniform1f(prg_bloom_extract->uniform.param_bright, lighting_enabled ? BLOOM_BRIGHT_PASS : 0.0);
+	glUniform2f(prg_bloom_extract->uniform.param_bright, lighting_enabled ? BLOOM_BRIGHT_PASS : 0.0, lighting_enabled ? 0.0 : BLOOM_BRIGHT_PASS);
 	render_post_pass(prg_bloom_extract, bloom_fbo[0], bloom_size, backbuffer_texture, tap_offset);
 
 	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
@@ -1150,6 +1195,31 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 	glUniform3f(prg_game->uniform.camera_pos, pos.x, pos.y, pos.z);
 	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
 	render_set_material(RENDER_MATERIAL_DEFAULT);
+	render_set_lights(NULL, 0);
+}
+
+void render_set_lights(render_light_t *lights, int len) {
+	render_flush();
+	len = min(len, RENDER_LIGHTS_MAX);
+
+	float pos[RENDER_LIGHTS_MAX * 4];
+	float color[RENDER_LIGHTS_MAX * 3];
+	for (int i = 0; i < len; i++) {
+		vec3_t view_pos = vec3_transform(lights[i].pos, &view_mat);
+		float radius = max(lights[i].radius, 1.0);
+		pos[i * 4 + 0] = view_pos.x;
+		pos[i * 4 + 1] = view_pos.y;
+		pos[i * 4 + 2] = view_pos.z;
+		pos[i * 4 + 3] = 1.0 / (radius * radius);
+		color[i * 3 + 0] = lights[i].color.x;
+		color[i * 3 + 1] = lights[i].color.y;
+		color[i * 3 + 2] = lights[i].color.z;
+	}
+	if (len > 0) {
+		glUniform4fv(prg_game->uniform.lights_pos, len, pos);
+		glUniform3fv(prg_game->uniform.lights_color, len, color);
+	}
+	glUniform1i(prg_game->uniform.lights_len, len);
 }
 
 void render_set_view_2d(void) {
@@ -1282,7 +1352,13 @@ void render_push_tris(tris_t tris, uint16_t texture_index) {
 	}
 	if (!model_mat_is_identity) {
 		for (int i = 0; i < 3; i++) {
-			tris.vertices[i].pos = vec3_transform(tris.vertices[i].pos, &model_mat);
+			vertex_t *vertex = &tris.vertices[i];
+			vec3_t pos = vec3_transform(vertex->pos, &model_mat);
+			if (vertex->normal.x != 0 || vertex->normal.y != 0 || vertex->normal.z != 0) {
+				// Rotate (not translate) the normal
+				vertex->normal = vec3_sub(vec3_transform(vec3_add(vertex->pos, vertex->normal), &model_mat), pos);
+			}
+			vertex->pos = pos;
 		}
 	}
 	tris_buffer[tris_len++] = tris;

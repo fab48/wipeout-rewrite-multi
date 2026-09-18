@@ -42,6 +42,44 @@ static void race_set_player_view(int player, vec2i_t screen) {
 	}
 }
 
+// The engine flares light up their surroundings: one point light per ship, at
+// the position of its exhaust, for the RENDER_LIGHTS_MAX ships closest to the
+// camera.
+static void race_set_exhaust_lights(void) {
+	render_light_t lights[len(g.ships)];
+	float distances[len(g.ships)];
+	int lights_len = 0;
+
+	for (int i = 0; i < len(g.ships); i++) {
+		ship_t *ship = &g.ships[i];
+		vec3_t pos;
+		float intensity;
+		if (!ship_exhaust_light(ship, &pos, &intensity)) {
+			continue;
+		}
+
+		render_light_t light = {
+			.pos = pos,
+			.color = vec3(0.35 * intensity, 0.6 * intensity, 1.4 * intensity),
+			.radius = 2800
+		};
+		float distance = vec3_len(vec3_sub(pos, g.camera->position));
+
+		// Insert sorted by distance
+		int j = lights_len;
+		while (j > 0 && distances[j - 1] > distance) {
+			lights[j] = lights[j - 1];
+			distances[j] = distances[j - 1];
+			j--;
+		}
+		lights[j] = light;
+		distances[j] = distance;
+		lights_len++;
+	}
+
+	render_set_lights(lights, min(lights_len, RENDER_LIGHTS_MAX));
+}
+
 void race_init(void) {
 	ingame_menus_load();
 	menu_is_scroll_text = false;
@@ -128,6 +166,7 @@ void race_update(void) {
 		race_set_player_view(p, screen);
 		render_set_view(g.camera->position, g.camera->angle);
 		render_set_screen_position(g.camera->shake);
+		race_set_exhaust_lights();
 
 		render_set_cull_backface(false);
 		scene_draw(g.camera);

@@ -80,6 +80,15 @@ void render_set_depth_offset(float offset);
 void render_set_screen_position(vec2_t pos);
 void render_set_blend_mode(render_blend_mode_t mode);
 void render_set_material(render_material_t material);
+
+// Point lights for the PBR lighting; world space. Call after render_set_view().
+#define RENDER_LIGHTS_MAX 6
+typedef struct {
+	vec3_t pos;
+	vec3_t color; // 1.0 = as bright as the sun
+	float radius;
+} render_light_t;
+void render_set_lights(render_light_t *lights, int len);
 void render_set_cull_backface(bool enabled);
 
 vec3_t render_transform(vec3_t pos);
