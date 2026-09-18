@@ -47,6 +47,10 @@ static uint16_t ship_create_exhaust_flare_texture(void) {
 	return texture;
 }
 
+uint16_t ship_exhaust_flare_texture(void) {
+	return exhaust_flare_texture;
+}
+
 void ships_load(void) {
 	texture_list_t ship_textures = image_get_compressed_textures("wipeout/common/allsh.cmp");
 	Object *ship_models = objects_load("wipeout/common/allsh.prm", ship_textures);

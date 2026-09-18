@@ -6,6 +6,7 @@
 #include "../platform.h"
 
 #include "track.h"
+#include "ship.h"
 #include "camera.h"
 #include "game.h"
 
@@ -410,8 +411,9 @@ void track_draw(camera_t *camera) {
 	render_set_depth_write(false);
 	render_set_depth_offset(-16.0);
 
-	uint8_t boost_alpha = 170;
-	uint8_t pickup_alpha = 110 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 50;
+	uint8_t boost_alpha = 255;
+	uint8_t pickup_alpha = 170 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 70;
+	uint16_t halo_texture = ship_exhaust_flare_texture();
 
 	for(int32_t i = 0; i < g.track.section_count; i++) {
 		section_t *s = &g.track.sections[i];
@@ -438,6 +440,35 @@ void track_draw(camera_t *camera) {
 				}
 				render_push_tris(tris, tex_index);
 			}
+
+			// A soft halo around the pad, slightly above the track, so the 
+			// glow spills over the ground like a real light would
+			vec3_t v0 = face->tris[0].vertices[0].pos;
+			vec3_t v1 = face->tris[0].vertices[1].pos;
+			vec3_t v2 = face->tris[0].vertices[2].pos;
+			vec3_t v3 = face->tris[1].vertices[0].pos;
+			vec3_t center = vec3_mulf(vec3_add(vec3_add(v0, v1), vec3_add(v2, v3)), 0.25);
+			vec3_t lift = vec3_mulf(face->normal, 20);
+			vec3_t c0 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v0, center), 2.2)), lift);
+			vec3_t c1 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v1, center), 2.2)), lift);
+			vec3_t c2 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v2, center), 2.2)), lift);
+			vec3_t c3 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v3, center), 2.2)), lift);
+			rgba_t halo = face->tris[0].vertices[0].color;
+			halo.a = alpha * 0.8;
+			render_push_tris((tris_t){
+				.vertices = {
+					{.pos = c0, .uv = {0, 0}, .color = halo},
+					{.pos = c1, .uv = {128, 0}, .color = halo},
+					{.pos = c2, .uv = {128, 128}, .color = halo},
+				}
+			}, halo_texture);
+			render_push_tris((tris_t){
+				.vertices = {
+					{.pos = c3, .uv = {0, 128}, .color = halo},
+					{.pos = c0, .uv = {0, 0}, .color = halo},
+					{.pos = c2, .uv = {128, 128}, .color = halo},
+				}
+			}, halo_texture);
 		}
 	}
 
