@@ -143,7 +143,23 @@ static void page_options_init(menu_t *menu) {
 
 static const char *button_names[NUM_GAME_ACTIONS][2] = {};
 static int control_current_action;
+static int control_current_player = 0;
+static char *controls_player2_title = "PLAYER 2 CONTROLS";
 static float await_input_deadline;
+
+// The button table that is being edited
+static uint8_t (*control_buttons(void))[2] {
+	return control_current_player == 1 ? save2.buttons : save.buttons;
+}
+
+static void control_set_dirty(void) {
+	if (control_current_player == 1) {
+		save2.is_dirty = true;
+	}
+	else {
+		save.is_dirty = true;
+	}
+}
 
 void button_capture(void *user, button_t button, int32_t ascii_char) {
 	if (button == INPUT_INVALID) {
@@ -158,17 +174,31 @@ void button_capture(void *user, button_t button, int32_t ascii_char) {
 	}
 
 	int index = button < INPUT_KEY_MAX ? 0 : 1; // joypad or keyboard
+	uint8_t (*buttons)[2] = control_buttons();
+	int action = control_current_player == 1 ? A_P2_UP + control_current_action : control_current_action;
 
-	// unbind this button if it's bound anywhere
-	for (int i = 0; i < len(save.buttons); i++) {
+	// unbind this button if it's bound anywhere (for either player)
+	for (int i = 0; i < NUM_GAME_ACTIONS; i++) {
 		if (save.buttons[i][index] == button) {
 			save.buttons[i][index] = INPUT_INVALID;
+			save.is_dirty = true;
+		}
+		if (save2.buttons[i][index] == button) {
+			save2.buttons[i][index] = INPUT_INVALID;
+			save2.is_dirty = true;
 		}
 	}
+	input_unbind(INPUT_LAYER_USER, button);
+
+	// unbind the button previously used for this action
+	if (buttons[control_current_action][index] != INPUT_INVALID) {
+		input_unbind(INPUT_LAYER_USER, buttons[control_current_action][index]);
+	}
+
 	input_capture(NULL, NULL);
-	input_bind(INPUT_LAYER_USER, button, control_current_action);
-	save.buttons[control_current_action][index] = button;
-	save.is_dirty = true;
+	input_bind(INPUT_LAYER_USER, button, action);
+	buttons[control_current_action][index] = button;
+	control_set_dirty();
 	menu_pop(menu);
 }
 
@@ -199,6 +229,9 @@ static void page_options_controls_set_init(menu_t *menu, int data) {
 static void page_options_control_draw(menu_t *menu, int data) {
 	menu_page_t *page = &menu->pages[menu->index];
 
+	// Both the player 1 and the player 2 page use this draw function
+	control_current_player = (page->title == controls_player2_title) ? 1 : 0;
+
 	int left = page->items_pos.x + page->block_width - 100;
 	int right = page->items_pos.x + page->block_width;
 	int line_y = page->items_pos.y - 20;
@@ -210,22 +243,23 @@ static void page_options_control_draw(menu_t *menu, int data) {
 	ui_draw_text("JOYSTICK", ui_scaled_pos(page->items_anchor, right_head_pos), UI_SIZE_8, UI_COLOR_DEFAULT);
 	line_y += 20;
 
+	uint8_t (*buttons)[2] = control_buttons();
 	for (int action = 0; action < NUM_GAME_ACTIONS; action++) {
 		rgba_t text_color = UI_COLOR_DEFAULT;
 		if (action == page->index) {
 			text_color = UI_COLOR_ACCENT;
 		}
 
-		if (save.buttons[action][0] != INPUT_INVALID) {
-			const char *name = input_button_to_name(save.buttons[action][0]);
+		if (buttons[action][0] != INPUT_INVALID) {
+			const char *name = input_button_to_name(buttons[action][0]);
 			if (!name) {
 				name = "UNKNWN";
 			}
 			vec2i_t pos = vec2i(left - ui_text_width(name, UI_SIZE_8), line_y);
 			ui_draw_text(name, ui_scaled_pos(page->items_anchor, pos), UI_SIZE_8, text_color);
 		}
-		if (save.buttons[action][1] != INPUT_INVALID) {
-			const char *name = input_button_to_name(save.buttons[action][1]);
+		if (buttons[action][1] != INPUT_INVALID) {
+			const char *name = input_button_to_name(buttons[action][1]);
 			if (!name) {
 				name = "UNKNWN";
 			}
@@ -243,8 +277,19 @@ static void toggle_analog_response(menu_t *menu, int data) {
 
 static const char *analog_response[] = {"LINEAR", "MODERATE", "HEAVY"};
 
+static void page_options_controls_init_for_player(menu_t *menu, int player);
+
+static void button_player2_controls(menu_t *menu, int data) {
+	page_options_controls_init_for_player(menu, 1);
+}
+
 static void page_options_controls_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "CONTROLS", page_options_control_draw);
+	page_options_controls_init_for_player(menu, 0);
+}
+
+static void page_options_controls_init_for_player(menu_t *menu, int player) {
+	control_current_player = player;
+	menu_page_t *page = menu_push(menu, player == 1 ? controls_player2_title : "CONTROLS", page_options_control_draw);
 	flags_set(page->layout_flags, MENU_VERTICAL | MENU_FIXED);
 	page->title_pos = vec2i(-160, -100);
 	page->title_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
@@ -264,7 +309,10 @@ static void page_options_controls_init(menu_t *menu) {
 	menu_page_add_button(page, A_FIRE, "FIRE", page_options_controls_set_init);
 	menu_page_add_button(page, A_CHANGE_VIEW, "VIEW", page_options_controls_set_init);
 
-	menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
+	if (player == 0) {
+		menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
+		menu_page_add_button(page, 0, "PLAYER 2 CONTROLS", button_player2_controls);
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -579,6 +579,22 @@ const game_def_t def = {
 	}
 };
 
+save2_t save2 = {
+	.magic = SAVE2_DATA_MAGIC,
+	.is_dirty = false,
+	.buttons = {
+		[A_UP] = {INPUT_KEY_I, INPUT_GAMEPAD2_DPAD_UP},
+		[A_DOWN] = {INPUT_KEY_K, INPUT_GAMEPAD2_DPAD_DOWN},
+		[A_LEFT] = {INPUT_KEY_J, INPUT_GAMEPAD2_DPAD_LEFT},
+		[A_RIGHT] = {INPUT_KEY_L, INPUT_GAMEPAD2_DPAD_RIGHT},
+		[A_BRAKE_LEFT] = {INPUT_KEY_COMMA, INPUT_GAMEPAD2_L_SHOULDER},
+		[A_BRAKE_RIGHT] = {INPUT_KEY_PERIOD, INPUT_GAMEPAD2_R_SHOULDER},
+		[A_THRUST] = {INPUT_KEY_N, INPUT_GAMEPAD2_A},
+		[A_FIRE] = {INPUT_KEY_B, INPUT_GAMEPAD2_X},
+		[A_CHANGE_VIEW] = {INPUT_KEY_O, INPUT_GAMEPAD2_Y},
+	},
+};
+
 save_t save = {
 	.magic = SAVE_DATA_MAGIC,
 	.is_dirty = true,
@@ -928,37 +944,22 @@ void game_init(void) {
 	}
 
 
-	// Player 2; fixed bindings: the second gamepad or IJKL on the keyboard
-	static const struct { button_t button; uint8_t action; } p2_bindings[] = {
-		{INPUT_KEY_I, A_P2_UP},
-		{INPUT_KEY_K, A_P2_DOWN},
-		{INPUT_KEY_J, A_P2_LEFT},
-		{INPUT_KEY_L, A_P2_RIGHT},
-		{INPUT_KEY_COMMA, A_P2_BRAKE_LEFT},
-		{INPUT_KEY_PERIOD, A_P2_BRAKE_RIGHT},
-		{INPUT_KEY_N, A_P2_THRUST},
-		{INPUT_KEY_B, A_P2_FIRE},
-		{INPUT_KEY_O, A_P2_CHANGE_VIEW},
-
-		{INPUT_GAMEPAD2_DPAD_UP, A_P2_UP},
-		{INPUT_GAMEPAD2_DPAD_DOWN, A_P2_DOWN},
-		{INPUT_GAMEPAD2_DPAD_LEFT, A_P2_LEFT},
-		{INPUT_GAMEPAD2_DPAD_RIGHT, A_P2_RIGHT},
-		{INPUT_GAMEPAD2_L_STICK_UP, A_P2_UP},
-		{INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN},
-		{INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT},
-		{INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT},
-		{INPUT_GAMEPAD2_L_SHOULDER, A_P2_BRAKE_LEFT},
-		{INPUT_GAMEPAD2_R_SHOULDER, A_P2_BRAKE_RIGHT},
-		{INPUT_GAMEPAD2_L_TRIGGER, A_P2_BRAKE_LEFT},
-		{INPUT_GAMEPAD2_R_TRIGGER, A_P2_BRAKE_RIGHT},
-		{INPUT_GAMEPAD2_A, A_P2_THRUST},
-		{INPUT_GAMEPAD2_X, A_P2_FIRE},
-		{INPUT_GAMEPAD2_Y, A_P2_CHANGE_VIEW},
-	};
-	for (int i = 0; i < len(p2_bindings); i++) {
-		input_bind(INPUT_LAYER_USER, p2_bindings[i].button, p2_bindings[i].action);
+	// Player 2
+	save2_t *save2_file = (save2_t *)platform_load_userdata("controls2.dat", &size);
+	if (save2_file) {
+		if (size == sizeof(save2_t) && save2_file->magic == SAVE2_DATA_MAGIC) {
+			memcpy(&save2, save2_file, sizeof(save2_t));
+		}
+		mem_temp_free(save2_file);
 	}
+	game_bind_player2_controls();
+
+	// The left stick of the second gamepad always steers, it can't be bound
+	// through the menu (it is not reported as a button)
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_UP, A_P2_UP);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT);
 
 	// The second gamepad can pause and navigate the menus, too
 	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_UP, A_MENU_UP);
@@ -974,6 +975,16 @@ void game_init(void) {
 	g.camera = &g.cameras[0];
 
 	game_set_scene(GAME_SCENE_INTRO);
+}
+
+void game_bind_player2_controls(void) {
+	for (int action = 0; action < len(save2.buttons); action++) {
+		for (int i = 0; i < 2; i++) {
+			if (save2.buttons[action][i] != INPUT_INVALID) {
+				input_bind(INPUT_LAYER_USER, save2.buttons[action][i], A_P2_UP + action);
+			}
+		}
+	}
 }
 
 void game_set_scene(game_scene_t scene) {
@@ -1029,6 +1040,11 @@ void game_update(void) {
 		save.is_dirty = false;
 		platform_store_userdata("save.dat", &save, sizeof(save_t));
 		printf("wrote save.dat\n");
+	}
+	if (save2.is_dirty) {
+		save2.is_dirty = false;
+		platform_store_userdata("controls2.dat", &save2, sizeof(save2_t));
+		printf("wrote controls2.dat\n");
 	}
 
 	double now = platform_now();

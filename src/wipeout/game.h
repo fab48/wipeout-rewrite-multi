@@ -330,6 +330,20 @@ static inline ship_t *game_player_ship(int player) {
 }
 extern save_t save;
 
+// Player 2 controls; stored in a separate file, so that the save_t layout
+// (and with it the highscores) stays untouched
+#define SAVE2_DATA_MAGIC 0x32736f77
+
+typedef struct {
+	uint32_t magic;
+	bool is_dirty;
+	uint8_t buttons[NUM_GAME_ACTIONS][2];
+} save2_t;
+
+extern save2_t save2;
+
+void game_bind_player2_controls(void);
+
 void game_init(void);
 void game_set_scene(game_scene_t scene);
 void game_reset_championship(void);
