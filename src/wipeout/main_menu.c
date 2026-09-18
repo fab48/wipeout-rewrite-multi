@@ -7,6 +7,7 @@
 #include "menu.h"
 #include "main_menu.h"
 #include "game.h"
+#include "settings.h"
 #include "image.h"
 #include "ui.h"
 
@@ -295,14 +296,8 @@ static void page_options_controls_init_for_player(menu_t *menu, int player);
 static const char *opts_swap_gamepads[] = {"OFF", "ON"};
 
 static void toggle_swap_gamepads(menu_t *menu, int data) {
-	if (data) {
-		save.post_effect |= RENDER_POST_SWAP_GAMEPADS;
-	}
-	else {
-		save.post_effect &= ~RENDER_POST_SWAP_GAMEPADS;
-	}
-	input_set_gamepad_swap(data);
-	save.is_dirty = true;
+	settings.swap_gamepads = data;
+	settings_set_dirty();
 }
 
 static void button_player2_controls(menu_t *menu, int data) {
@@ -337,7 +332,7 @@ static void page_options_controls_init_for_player(menu_t *menu, int player) {
 
 	if (player == 0) {
 		menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
-		menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SWAP_GAMEPADS) ? 1 : 0, "SWAP GAMEPADS", opts_swap_gamepads, len(opts_swap_gamepads), toggle_swap_gamepads);
+		menu_page_add_toggle(page, settings.swap_gamepads ? 1 : 0, "SWAP GAMEPADS", opts_swap_gamepads, len(opts_swap_gamepads), toggle_swap_gamepads);
 		menu_page_add_button(page, 0, "PLAYER 2 CONTROLS", button_player2_controls);
 	}
 }
@@ -372,85 +367,73 @@ static void toggle_res(menu_t *menu, int data) {
 	save.is_dirty = true;
 }
 
-static void toggle_post_flag(int flag, int enabled) {
-	if (enabled) {
-		save.post_effect |= flag;
+// Toggles backed by the settings struct (settings.txt)
+#define SETTINGS_TOGGLE(NAME, FIELD) \
+	static void NAME(menu_t *menu, int data) { \
+		settings.FIELD = data; \
+		settings_set_dirty(); \
 	}
-	else {
-		save.post_effect &= ~flag;
-	}
-	render_set_post_effect(save.post_effect);
-	save.is_dirty = true;
-}
 
-static void toggle_post_crt(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_CRT, data);
-}
-
-static void toggle_post_bloom(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_BLOOM, data);
-}
-
-static void toggle_post_motion_blur(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_MOTION_BLUR, data);
-}
-
-static void toggle_post_lighting(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_LIGHTING, data);
-}
+SETTINGS_TOGGLE(toggle_crt, crt)
+SETTINGS_TOGGLE(toggle_bloom, bloom)
+SETTINGS_TOGGLE(toggle_bloom_threshold, bloom_threshold)
+SETTINGS_TOGGLE(toggle_motion_blur, motion_blur)
+SETTINGS_TOGGLE(toggle_tonemap, tonemap)
+SETTINGS_TOGGLE(toggle_lighting, lighting)
+SETTINGS_TOGGLE(toggle_split, split_vertical)
+SETTINGS_TOGGLE(toggle_default_view, external_view)
+SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
 
 static const char *opts_bloom_threshold[] = {"DEFAULT", "LOW", "LOWER", "HIGH"};
-
-static void toggle_post_bloom_threshold(menu_t *menu, int data) {
-	save.post_effect &= ~RENDER_POST_BLOOM_THRESHOLD_MASK;
-	save.post_effect |= data << RENDER_POST_BLOOM_THRESHOLD_SHIFT;
-	render_set_post_effect(save.post_effect);
-	save.is_dirty = true;
-}
-
 static const char *opts_split[] = {"HORIZONTAL", "VERTICAL"};
 static const char *opts_view[] = {"INTERNAL", "EXTERNAL"};
 static const char *opts_draw_distance[] = {"FULL", "FAR", "MEDIUM", "NEAR"};
 
-static void toggle_default_view(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_EXTERNAL_VIEW, data);
+// Multiplier options: the strings and their values
+static const char *opts_percent[] = {"25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%"};
+static const float percent_values[] = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0};
+
+static int percent_index(float value) {
+	int best = 0;
+	for (int i = 0; i < len(percent_values); i++) {
+		if (fabsf(percent_values[i] - value) < fabsf(percent_values[best] - value)) {
+			best = i;
+		}
+	}
+	return best;
 }
 
-static void toggle_draw_distance(menu_t *menu, int data) {
-	save.post_effect &= ~RENDER_POST_DRAW_DISTANCE_MASK;
-	save.post_effect |= data << RENDER_POST_DRAW_DISTANCE_SHIFT;
-	render_set_post_effect(save.post_effect);
-	save.is_dirty = true;
+static void toggle_bloom_intensity(menu_t *menu, int data) {
+	settings.bloom_intensity = percent_values[data];
+	settings_set_dirty();
 }
 
-
-static void toggle_split(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_SPLIT_VERTICAL, data);
+static void toggle_motion_blur_strength(menu_t *menu, int data) {
+	settings.motion_blur_strength = percent_values[data];
+	settings_set_dirty();
 }
 
-static void toggle_post_tonemap(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_NO_TONEMAP, !data);
+static void toggle_lighting_brightness(menu_t *menu, int data) {
+	settings.lighting_brightness = percent_values[data];
+	settings_set_dirty();
 }
 
 static const int point_light_counts[] = {0, 1, 2, 3, 4, 6};
 static const char *opts_point_lights[] = {"OFF", "1", "2", "3", "4", "6"};
 
 static int point_lights_option_index(void) {
-	int count = (save.post_effect & RENDER_POST_POINT_LIGHTS_MASK) >> RENDER_POST_POINT_LIGHTS_SHIFT;
 	int index = 0;
 	for (int i = 0; i < len(point_light_counts); i++) {
-		if (point_light_counts[i] <= count) {
+		if (point_light_counts[i] <= settings.point_lights) {
 			index = i;
 		}
 	}
 	return index;
 }
 
-static void toggle_post_point_lights(menu_t *menu, int data) {
-	save.post_effect &= ~RENDER_POST_POINT_LIGHTS_MASK;
-	save.post_effect |= point_light_counts[data] << RENDER_POST_POINT_LIGHTS_SHIFT;
-	render_set_post_effect(save.post_effect);
-	save.is_dirty = true;
+static void toggle_point_lights(menu_t *menu, int data) {
+	settings.point_lights = point_light_counts[data];
+	settings_set_dirty();
 }
 
 static void toggle_screen_shake(menu_t *menu, int data) {
@@ -464,6 +447,31 @@ static const char *opts_ui_sizes[] = {"AUTO", "1X", "2X", "3X", "4X"};
 static const char *opts_draw_stats[] = {"OFF", "FPS", "DEBUG"};
 static const char *opts_res[] = {"NATIVE", "240P", "480P", "720P"};
 static const char *opts_screen_shake[] = {"DISABLED", "REDUCED", "FULL"};
+
+static void page_options_effects_init(menu_t *menu) {
+	menu_page_t *page = menu_push(menu, "RENDER EFFECTS", NULL);
+	flags_set(page->layout_flags, MENU_VERTICAL | MENU_FIXED);
+	page->title_pos = vec2i(-160, -100);
+	page->title_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+	page->items_pos = vec2i(-160, -60);
+	page->block_width = 320;
+	page->items_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+
+	menu_page_add_toggle(page, settings.crt, "CRT EFFECT", opts_off_on, len(opts_off_on), toggle_crt);
+	menu_page_add_toggle(page, settings.bloom, "BLOOM", opts_off_on, len(opts_off_on), toggle_bloom);
+	menu_page_add_toggle(page, settings.bloom_threshold, "BLOOM THRESHOLD", opts_bloom_threshold, len(opts_bloom_threshold), toggle_bloom_threshold);
+	menu_page_add_toggle(page, percent_index(settings.bloom_intensity), "BLOOM INTENSITY", opts_percent, len(opts_percent), toggle_bloom_intensity);
+	menu_page_add_toggle(page, settings.motion_blur, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_motion_blur);
+	menu_page_add_toggle(page, percent_index(settings.motion_blur_strength), "MOTION BLUR STRENGTH", opts_percent, len(opts_percent), toggle_motion_blur_strength);
+	menu_page_add_toggle(page, settings.tonemap, "TONEMAPPING", opts_off_on, len(opts_off_on), toggle_tonemap);
+	menu_page_add_toggle(page, settings.lighting, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_lighting);
+	menu_page_add_toggle(page, percent_index(settings.lighting_brightness), "LIGHTING BRIGHTNESS", opts_percent, len(opts_percent), toggle_lighting_brightness);
+	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_point_lights);
+}
+
+static void button_effects(menu_t *menu, int data) {
+	page_options_effects_init(menu);
+}
 
 static void page_options_video_init(menu_t *menu) {
 	menu_page_t *page = menu_push(menu, "VIDEO OPTIONS", NULL);
@@ -482,16 +490,10 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, save.ui_scale, "UI SCALE", opts_ui_sizes, len(opts_ui_sizes), toggle_ui_scale);
 	menu_page_add_toggle(page, save.draw_stats, "DRAW STATS", opts_draw_stats, len(opts_draw_stats), toggle_draw_stats);
 	menu_page_add_toggle(page, save.screen_res, "SCREEN RESOLUTION", opts_res, len(opts_res), toggle_res);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_CRT) ? 1 : 0, "CRT EFFECT", opts_off_on, len(opts_off_on), toggle_post_crt);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM) ? 1 : 0, "BLOOM", opts_off_on, len(opts_off_on), toggle_post_bloom);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM_THRESHOLD_MASK) >> RENDER_POST_BLOOM_THRESHOLD_SHIFT, "BLOOM THRESHOLD", opts_bloom_threshold, len(opts_bloom_threshold), toggle_post_bloom_threshold);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_NO_TONEMAP) ? 0 : 1, "TONEMAPPING", opts_off_on, len(opts_off_on), toggle_post_tonemap);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SPLIT_VERTICAL) ? 1 : 0, "SPLIT SCREEN", opts_split, len(opts_split), toggle_split);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_EXTERNAL_VIEW) ? 1 : 0, "DEFAULT VIEW", opts_view, len(opts_view), toggle_default_view);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_DRAW_DISTANCE_MASK) >> RENDER_POST_DRAW_DISTANCE_SHIFT, "DRAW DISTANCE", opts_draw_distance, len(opts_draw_distance), toggle_draw_distance);
-	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
-	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_post_point_lights);
+	menu_page_add_toggle(page, settings.draw_distance, "DRAW DISTANCE", opts_draw_distance, len(opts_draw_distance), toggle_draw_distance);
+	menu_page_add_toggle(page, settings.external_view, "DEFAULT VIEW", opts_view, len(opts_view), toggle_default_view);
+	menu_page_add_toggle(page, settings.split_vertical, "SPLIT SCREEN", opts_split, len(opts_split), toggle_split);
+	menu_page_add_button(page, 0, "RENDER EFFECTS", button_effects);
 }
 
 // -----------------------------------------------------------------------------

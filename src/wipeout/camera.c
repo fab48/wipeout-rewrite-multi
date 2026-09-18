@@ -8,6 +8,7 @@
 #include "droid.h"
 #include "camera.h"
 #include "game.h"
+#include "settings.h"
 
 void camera_init(camera_t *camera, section_t *section) {
 	camera->section = section;
@@ -114,7 +115,7 @@ void camera_update_race_intro(camera_t *camera, ship_t *ship, droid_t *droid) {
 	camera->angle.y = -atan2f(target.x, target.z);
 
 	if (ship->update_timer <= UPDATE_TIME_RACE_VIEW) {
-		if (save.post_effect & RENDER_POST_EXTERNAL_VIEW) {
+		if (settings.external_view) {
 			flags_rm(ship->flags, SHIP_VIEW_INTERNAL);
 			camera->update_func = camera_update_race_external;
 		}

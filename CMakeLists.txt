@@ -75,6 +75,7 @@ set(common_src
 	src/wipeout/scene.c
 	src/wipeout/scene.h
 	src/wipeout/sfx.c
+	src/wipeout/settings.c
 	src/wipeout/sfx.h
 	src/wipeout/ship.c
 	src/wipeout/ship.h

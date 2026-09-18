@@ -216,6 +216,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
 	uniform float tonemap; // 1 = soft knee on the highlights
+	uniform float lighting_scale; // brightness multiplier for the lit result
 	uniform samplerCube env_map; // the sky, for reflections
 	uniform mat4 view_inv; // view space -> world space (rotation only)
 	uniform float env_amount; // 0 = procedural sky gradient, 1 = cubemap
@@ -373,7 +374,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 			vec3 env_fresnel = f0 + (max(vec3(smoothness), f0) - f0) * pow5(1.0 - ndv);
 			vec3 reflection = env * env_fresnel * smoothness * (0.6 + metallic * 1.0);
 
-			vec3 lit = diffuse + (specular + reflection) * gloss;
+			vec3 lit = (diffuse + (specular + reflection) * gloss) * lighting_scale;
 
 			// Overbright texels (signs, lights, markers) are emissive
 			float brightness = max(tex_color.r, max(tex_color.g, tex_color.b));
@@ -423,6 +424,7 @@ typedef struct {
 		GLuint time;
 		GLuint material;
 		GLuint tonemap;
+		GLuint lighting_scale;
 		GLuint env;
 		GLuint view_inv;
 		GLuint env_amount;
@@ -451,6 +453,7 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
 	s->uniform.tonemap = glGetUniformLocation(s->program, "tonemap");
+	s->uniform.lighting_scale = glGetUniformLocation(s->program, "lighting_scale");
 	s->uniform.env = glGetUniformLocation(s->program, "env_map");
 	s->uniform.view_inv = glGetUniformLocation(s->program, "view_inv");
 	s->uniform.env_amount = glGetUniformLocation(s->program, "env_amount");
@@ -776,6 +779,8 @@ static GLuint scratch_texture = 0;
 static bool bloom_enabled = false;
 static bool tonemap_enabled = true;
 static render_post_effect_t current_post_effect = RENDER_POST_NONE;
+static float bloom_intensity_scale = 1.0;
+static float motion_blur_scale = 1.0;
 static float draw_distance_factor = 1.0;
 
 #define ENV_SIZE 128
@@ -872,6 +877,7 @@ void render_init(vec2i_t screen_size) {
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
 	glUniform1f(prg_game->uniform.lights_len, 0);
 	glUniform1f(prg_game->uniform.tonemap, 1.0);
+	glUniform1f(prg_game->uniform.lighting_scale, 1.0);
 	glUniform1f(prg_game->uniform.env_amount, 0.0);
 	glUniformMatrix4fv(prg_game->uniform.view_inv, 1, false, mat4_identity().m);
 
@@ -1208,7 +1214,7 @@ static void render_bloom(void) {
 	// (1 - (1-a)(1-b)): like an add, but it never clips to white
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ONE);
-	render_post_pass(prg_bloom_composite, backbuffer, backbuffer_size, bloom_texture[0], vec2(BLOOM_INTENSITY, 0));
+	render_post_pass(prg_bloom_composite, backbuffer, backbuffer_size, bloom_texture[0], vec2(BLOOM_INTENSITY * bloom_intensity_scale, 0));
 	render_apply_blend_mode();
 }
 
@@ -1229,7 +1235,7 @@ void render_scene_post(float motion_blur) {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-		render_post_pass(prg_motion_blur, scratch_fbo, backbuffer_size, backbuffer_texture, vec2(motion_blur * MOTION_BLUR_STRENGTH, 0));
+		render_post_pass(prg_motion_blur, scratch_fbo, backbuffer_size, backbuffer_texture, vec2(motion_blur * MOTION_BLUR_STRENGTH * motion_blur_scale, 0));
 
 		glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -1436,6 +1442,13 @@ void render_env_finish(void) {
 void render_env_clear(void) {
 	render_flush();
 	glUniform1f(prg_game->uniform.env_amount, 0.0);
+}
+
+void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness) {
+	render_flush();
+	bloom_intensity_scale = bloom_intensity;
+	motion_blur_scale = motion_blur_strength;
+	glUniform1f(prg_game->uniform.lighting_scale, lighting_brightness);
 }
 
 render_post_effect_t render_get_post_effect(void) {

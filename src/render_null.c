@@ -43,6 +43,11 @@ void render_set_lights(render_light_t *lights, int len) {
 void render_set_material(render_material_t material) {
 	(void) material;
 }
+void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness) {
+	(void) bloom_intensity;
+	(void) motion_blur_strength;
+	(void) lighting_brightness;
+}
 render_post_effect_t render_get_post_effect(void) {
 	return RENDER_POST_NONE;
 }

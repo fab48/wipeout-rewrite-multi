@@ -7,6 +7,7 @@
 #include "../input.h"
 
 #include "game.h"
+#include "settings.h"
 #include "ship.h"
 #include "weapon.h"
 #include "droid.h"
@@ -877,7 +878,8 @@ void game_init(void) {
 
 	platform_set_fullscreen(save.fullscreen);
 	render_set_resolution(save.screen_res);
-	render_set_post_effect(save.post_effect);
+	settings_load();
+	settings_apply();
 
 	srand((int)(platform_now() * 100));
 	
@@ -982,7 +984,7 @@ void game_init(void) {
 	g.num_players = 1;
 	g.view_player = 0;
 	g.camera = &g.cameras[0];
-	input_set_gamepad_swap(save.post_effect & RENDER_POST_SWAP_GAMEPADS);
+	settings_apply();
 
 	game_set_scene(GAME_SCENE_INTRO);
 }
@@ -1049,13 +1051,15 @@ void game_update(void) {
 	static bool fx_disabled = false;
 	if (input_pressed(A_TOGGLE_FX)) {
 		fx_disabled = !fx_disabled;
-		int kept = save.post_effect & (RENDER_POST_SPLIT_VERTICAL | RENDER_POST_SWAP_GAMEPADS | RENDER_POST_EXTERNAL_VIEW | RENDER_POST_DRAW_DISTANCE_MASK);
-		render_set_post_effect(fx_disabled ? (kept | RENDER_POST_NO_TONEMAP) : save.post_effect);
+		int kept = settings_post_flags() & (RENDER_POST_SPLIT_VERTICAL | RENDER_POST_SWAP_GAMEPADS | RENDER_POST_EXTERNAL_VIEW | RENDER_POST_DRAW_DISTANCE_MASK);
+		render_set_post_effect(fx_disabled ? (kept | RENDER_POST_NO_TONEMAP) : settings_post_flags());
 	}
 	if (fx_disabled) {
 		render_set_view_2d();
 		ui_draw_text("FX OFF", ui_scaled_pos(UI_POS_TOP | UI_POS_CENTER, vec2i(-24, 4)), UI_SIZE_8, UI_COLOR_ACCENT);
 	}
+
+	settings_store_if_dirty();
 
 	if (save.is_dirty) {
 		// FIXME: use a text based format?

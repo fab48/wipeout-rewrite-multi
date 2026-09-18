@@ -10,6 +10,7 @@
 #include "camera.h"
 #include "scene.h"
 #include "game.h"
+#include "settings.h"
 #include "hud.h"
 #include "ui.h"
 #include "sfx.h"
@@ -32,7 +33,7 @@ static void race_set_player_view(int player, vec2i_t screen) {
 	g.camera = &g.cameras[player];
 
 	if (g.num_players > 1) {
-		if (save.post_effect & RENDER_POST_SPLIT_VERTICAL) {
+		if settings.split_vertical {
 			// Side by side
 			int half = screen.x / 2;
 			if (player == 0) {
@@ -290,7 +291,7 @@ void race_update(void) {
 
 	// Draw 2d; with a smaller HUD for the half height views in split screen
 	int ui_scale = ui_get_scale();
-	if (g.num_players > 1 && !(save.post_effect & RENDER_POST_SPLIT_VERTICAL)) {
+	if (g.num_players > 1 && !settings.split_vertical) {
 		ui_set_scale(max(1, (ui_scale + 1) / 2));
 	}
 
@@ -324,7 +325,7 @@ void race_update(void) {
 	if (g.num_players > 1) {
 		// Divider between the two views
 		int thickness = max(2, screen.y / 270);
-		if (save.post_effect & RENDER_POST_SPLIT_VERTICAL) {
+		if settings.split_vertical {
 			render_push_2d(vec2i(screen.x / 2 - thickness / 2, 0), vec2i(thickness, screen.y), rgba(0, 0, 0, 255), RENDER_NO_TEXTURE);
 		}
 		else {
