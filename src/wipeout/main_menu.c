@@ -292,6 +292,19 @@ static const char *analog_response[] = {"LINEAR", "MODERATE", "HEAVY"};
 
 static void page_options_controls_init_for_player(menu_t *menu, int player);
 
+static const char *opts_swap_gamepads[] = {"OFF", "ON"};
+
+static void toggle_swap_gamepads(menu_t *menu, int data) {
+	if (data) {
+		save.post_effect |= RENDER_POST_SWAP_GAMEPADS;
+	}
+	else {
+		save.post_effect &= ~RENDER_POST_SWAP_GAMEPADS;
+	}
+	input_set_gamepad_swap(data);
+	save.is_dirty = true;
+}
+
 static void button_player2_controls(menu_t *menu, int data) {
 	page_options_controls_init_for_player(menu, 1);
 }
@@ -324,7 +337,7 @@ static void page_options_controls_init_for_player(menu_t *menu, int player) {
 
 	if (player == 0) {
 		menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
-		menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SWAP_GAMEPADS) ? 1 : 0, "SWAP GAMEPADS", opts_off_on, len(opts_off_on), toggle_swap_gamepads);
+		menu_page_add_toggle(page, (save.post_effect & RENDER_POST_SWAP_GAMEPADS) ? 1 : 0, "SWAP GAMEPADS", opts_swap_gamepads, len(opts_swap_gamepads), toggle_swap_gamepads);
 		menu_page_add_button(page, 0, "PLAYER 2 CONTROLS", button_player2_controls);
 	}
 }
@@ -410,10 +423,6 @@ static void toggle_draw_distance(menu_t *menu, int data) {
 	save.is_dirty = true;
 }
 
-static void toggle_swap_gamepads(menu_t *menu, int data) {
-	toggle_post_flag(RENDER_POST_SWAP_GAMEPADS, data);
-	input_set_gamepad_swap(data);
-}
 
 static void toggle_split(menu_t *menu, int data) {
 	toggle_post_flag(RENDER_POST_SPLIT_VERTICAL, data);
