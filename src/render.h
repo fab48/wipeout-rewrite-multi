@@ -28,6 +28,7 @@ typedef enum {
 	// Bloom threshold preset (0..3), two bits
 	RENDER_POST_BLOOM_THRESHOLD_SHIFT = 7,
 	RENDER_POST_BLOOM_THRESHOLD_MASK = (3<<7),
+	RENDER_POST_NO_TONEMAP = (1<<9), // inverted, so that old saves keep the tonemapping on
 } render_post_effect_t;
 
 // Materials for the (approximated) PBR lighting. Anything drawn with

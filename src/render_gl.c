@@ -215,6 +215,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec3 v_up;
 	uniform sampler2D texture;
 	uniform vec4 material; // x = metallic, y = smoothness, z = emissive, w = lit (2 = smooth ground)
+	uniform float tonemap; // 1 = soft knee on the highlights
 	varying vec3 v_pointlight;
 	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2, negative = per pixel
 	uniform vec3 lights_color[6];
@@ -370,9 +371,11 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 		// Soft knee on the highlights: everything above 0.75 is compressed
 		// smoothly instead of clipping to white. Leaves some headroom for the
 		// bloom and keeps the color of bright, saturated pixels.
-		vec3 knee = vec3(0.75);
-		vec3 over = max(color.rgb - knee, vec3(0.0));
-		color.rgb = min(color.rgb, knee) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+		if (tonemap > 0.5) {
+			vec3 knee = vec3(0.75);
+			vec3 over = max(color.rgb - knee, vec3(0.0));
+			color.rgb = min(color.rgb, knee) + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
+		}
 
 		gl_FragColor = color;
 	}
@@ -390,6 +393,7 @@ typedef struct {
 		GLuint fade;
 		GLuint time;
 		GLuint material;
+		GLuint tonemap;
 		GLuint lights_pos;
 		GLuint lights_color;
 		GLuint lights_len;
@@ -414,6 +418,7 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.camera_pos = glGetUniformLocation(s->program, "camera_pos");
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
+	s->uniform.tonemap = glGetUniformLocation(s->program, "tonemap");
 	s->uniform.lights_pos = glGetUniformLocation(s->program, "lights_pos");
 	s->uniform.lights_color = glGetUniformLocation(s->program, "lights_color");
 	s->uniform.lights_len = glGetUniformLocation(s->program, "lights_len");
@@ -817,6 +822,7 @@ void render_init(vec2i_t screen_size) {
 	use_program(prg_game);
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
 	glUniform1f(prg_game->uniform.lights_len, 0);
+	glUniform1f(prg_game->uniform.tonemap, 1.0);
 
 	render_set_view(vec3(0, 0, 0), vec3(0, 0, 0));
 	render_set_model_mat(&mat4_identity());
@@ -1013,6 +1019,7 @@ void render_set_post_effect(render_post_effect_t post) {
 	render_flush();
 	lighting_enabled = (post & RENDER_POST_LIGHTING);
 	render_apply_material();
+	glUniform1f(prg_game->uniform.tonemap, (post & RENDER_POST_NO_TONEMAP) ? 0.0 : 1.0);
 }
 
 vec2i_t render_size(void) {

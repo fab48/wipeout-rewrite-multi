@@ -394,6 +394,10 @@ static void toggle_post_bloom_threshold(menu_t *menu, int data) {
 	save.is_dirty = true;
 }
 
+static void toggle_post_tonemap(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_NO_TONEMAP, !data);
+}
+
 static const int point_light_counts[] = {0, 1, 2, 3, 4, 6};
 static const char *opts_point_lights[] = {"OFF", "1", "2", "3", "4", "6"};
 
@@ -448,6 +452,7 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM) ? 1 : 0, "BLOOM", opts_off_on, len(opts_off_on), toggle_post_bloom);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM_THRESHOLD_MASK) >> RENDER_POST_BLOOM_THRESHOLD_SHIFT, "BLOOM THRESHOLD", opts_bloom_threshold, len(opts_bloom_threshold), toggle_post_bloom_threshold);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_NO_TONEMAP) ? 0 : 1, "TONEMAPPING", opts_off_on, len(opts_off_on), toggle_post_tonemap);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
 	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_post_point_lights);
 }
