@@ -129,7 +129,8 @@ static void race_set_exhaust_lights(void) {
 		race_lights_insert(lights, distances, &lights_len, (render_light_t){
 			.pos = flash->pos,
 			.color = vec3_mulf(flash->color, intensity),
-			.radius = 18000
+			.radius = 9000,
+			.per_pixel = false
 		}, RENDER_FADEOUT_FAR); // explosions are rare: no distance limit
 	}
 	lights_len = min(lights_len, max_active);
@@ -148,7 +149,8 @@ static void race_set_exhaust_lights(void) {
 		race_lights_insert(exhausts, exhaust_distances, &exhausts_len, (render_light_t){
 			.pos = pos,
 			.color = vec3(0.35 * intensity, 0.6 * intensity, 1.4 * intensity),
-			.radius = 4200
+			.radius = 3000,
+			.per_pixel = true
 		}, LIGHTS_MAX_DISTANCE);
 	}
 	for (int i = 0; i < exhausts_len && lights_len < max_active; i++) {

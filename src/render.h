@@ -90,6 +90,7 @@ typedef struct {
 	vec3_t pos;
 	vec3_t color; // 1.0 = as bright as the sun
 	float radius;
+	bool per_pixel; // per pixel with specular (small lights) or per vertex diffuse (big ones)
 } render_light_t;
 void render_set_lights(render_light_t *lights, int len);
 void render_set_cull_backface(bool enabled);
