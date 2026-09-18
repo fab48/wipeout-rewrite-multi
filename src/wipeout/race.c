@@ -33,7 +33,7 @@ static void race_set_player_view(int player, vec2i_t screen) {
 	g.camera = &g.cameras[player];
 
 	if (g.num_players > 1) {
-		if settings.split_vertical {
+		if (settings.split_vertical) {
 			// Side by side
 			int half = screen.x / 2;
 			if (player == 0) {
@@ -325,7 +325,7 @@ void race_update(void) {
 	if (g.num_players > 1) {
 		// Divider between the two views
 		int thickness = max(2, screen.y / 270);
-		if settings.split_vertical {
+		if (settings.split_vertical) {
 			render_push_2d(vec2i(screen.x / 2 - thickness / 2, 0), vec2i(thickness, screen.y), rgba(0, 0, 0, 255), RENDER_NO_TEXTURE);
 		}
 		else {
