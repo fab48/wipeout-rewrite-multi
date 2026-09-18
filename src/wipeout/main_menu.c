@@ -385,6 +385,10 @@ static void toggle_post_lighting(menu_t *menu, int data) {
 	toggle_post_flag(RENDER_POST_LIGHTING, data);
 }
 
+static void toggle_post_point_lights(menu_t *menu, int data) {
+	toggle_post_flag(RENDER_POST_POINT_LIGHTS, data);
+}
+
 static void toggle_screen_shake(menu_t *menu, int data) {
 	save.screen_shake = (float)data * 0.5;
 	save.is_dirty = true;
@@ -418,6 +422,7 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_BLOOM) ? 1 : 0, "BLOOM", opts_off_on, len(opts_off_on), toggle_post_bloom);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_MOTION_BLUR) ? 1 : 0, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_post_motion_blur);
 	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_LIGHTING) ? 1 : 0, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_post_lighting);
+	menu_page_add_toggle(page, (save.post_effect & RENDER_POST_POINT_LIGHTS) ? 1 : 0, "POINT LIGHTS", opts_off_on, len(opts_off_on), toggle_post_point_lights);
 }
 
 // -----------------------------------------------------------------------------

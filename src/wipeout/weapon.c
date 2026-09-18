@@ -7,6 +7,7 @@
 #include "weapon.h"
 #include "object.h"
 #include "game.h"
+#include "race.h"
 #include "image.h"
 #include "particle.h"
 #include "camera.h"
@@ -198,6 +199,7 @@ void weapons_update(void) {
 					vec3_t velocity = vec3_rand(512);
 					particles_spawn(weapon->position, weapon->track_hit_particle, velocity, 256);
 				}
+				race_add_flash_light(weapon->position, weapon->track_hit_particle);
 				sfx_play_at(SFX_EXPLOSION_2, weapon->position, vec3(0,0,0), 1);
 				weapon->active = false;
 			}
@@ -351,6 +353,7 @@ ship_t *weapon_collides_with_ship(weapon_t *self) {
 				vec3_t velocity = vec3_add(base_vel, vec3_rand(512));
 				particles_spawn(self->position, self->ship_hit_particle, velocity, 256);
 			}
+			race_add_flash_light(self->position, self->ship_hit_particle);
 			return ship;
 		}
 	}

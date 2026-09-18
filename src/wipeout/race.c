@@ -42,42 +42,108 @@ static void race_set_player_view(int player, vec2i_t screen) {
 	}
 }
 
-// The engine flares light up their surroundings: one point light per ship, at
-// the position of its exhaust, for the RENDER_LIGHTS_MAX ships closest to the
-// camera.
+// Point lights: one per ship at its exhaust, plus short flashes for the
+// explosions. Only the closest few within LIGHTS_MAX_DISTANCE of the camera
+// are used. This is an option (POINT LIGHTS in the video options) and needs
+// the PBR lighting to have any effect.
+#define LIGHTS_MAX_ACTIVE 4
+#define LIGHTS_MAX_DISTANCE 14000.0
+#define FLASH_LIGHTS_MAX 8
+#define FLASH_LIGHT_DURATION 0.4
+
+typedef struct {
+	vec3_t pos;
+	vec3_t color;
+	float timer;
+} flash_light_t;
+
+static flash_light_t flash_lights[FLASH_LIGHTS_MAX];
+
+void race_add_flash_light(vec3_t pos, int particle_type) {
+	vec3_t color;
+	switch (particle_type) {
+	case PARTICLE_TYPE_FIRE:       color = vec3(2.2, 1.1, 0.35); break;
+	case PARTICLE_TYPE_FIRE_WHITE: color = vec3(2.0, 1.8, 1.4); break;
+	case PARTICLE_TYPE_EBOLT:
+	case PARTICLE_TYPE_GREENY:     color = vec3(0.5, 2.0, 0.7); break;
+	default:                       color = vec3(1.5, 1.5, 1.5); break;
+	}
+
+	// Take a free slot, or the one that is closest to expiring
+	int slot = 0;
+	for (int i = 0; i < FLASH_LIGHTS_MAX; i++) {
+		if (flash_lights[i].timer < flash_lights[slot].timer) {
+			slot = i;
+		}
+	}
+	flash_lights[slot] = (flash_light_t){.pos = pos, .color = color, .timer = FLASH_LIGHT_DURATION};
+}
+
+static void race_update_flash_lights(void) {
+	for (int i = 0; i < FLASH_LIGHTS_MAX; i++) {
+		if (flash_lights[i].timer > 0) {
+			flash_lights[i].timer -= system_tick();
+		}
+	}
+}
+
+static void race_lights_insert(render_light_t *lights, float *distances, int *lights_len, render_light_t light) {
+	float distance = vec3_len(vec3_sub(light.pos, g.camera->position));
+	if (distance > LIGHTS_MAX_DISTANCE + light.radius) {
+		return;
+	}
+
+	// Insert sorted by distance
+	int j = *lights_len;
+	while (j > 0 && distances[j - 1] > distance) {
+		lights[j] = lights[j - 1];
+		distances[j] = distances[j - 1];
+		j--;
+	}
+	lights[j] = light;
+	distances[j] = distance;
+	(*lights_len)++;
+}
+
 static void race_set_exhaust_lights(void) {
-	render_light_t lights[len(g.ships)];
-	float distances[len(g.ships)];
+	if (!(save.post_effect & RENDER_POST_POINT_LIGHTS)) {
+		render_set_lights(NULL, 0);
+		return;
+	}
+
+	render_light_t lights[len(g.ships) + FLASH_LIGHTS_MAX];
+	float distances[len(g.ships) + FLASH_LIGHTS_MAX];
 	int lights_len = 0;
 
 	for (int i = 0; i < len(g.ships); i++) {
-		ship_t *ship = &g.ships[i];
 		vec3_t pos;
 		float intensity;
-		if (!ship_exhaust_light(ship, &pos, &intensity)) {
+		if (!ship_exhaust_light(&g.ships[i], &pos, &intensity)) {
 			continue;
 		}
-
-		render_light_t light = {
+		race_lights_insert(lights, distances, &lights_len, (render_light_t){
 			.pos = pos,
 			.color = vec3(0.35 * intensity, 0.6 * intensity, 1.4 * intensity),
 			.radius = 2800
-		};
-		float distance = vec3_len(vec3_sub(pos, g.camera->position));
-
-		// Insert sorted by distance
-		int j = lights_len;
-		while (j > 0 && distances[j - 1] > distance) {
-			lights[j] = lights[j - 1];
-			distances[j] = distances[j - 1];
-			j--;
-		}
-		lights[j] = light;
-		distances[j] = distance;
-		lights_len++;
+		});
 	}
 
-	render_set_lights(lights, min(lights_len, RENDER_LIGHTS_MAX));
+	for (int i = 0; i < FLASH_LIGHTS_MAX; i++) {
+		flash_light_t *flash = &flash_lights[i];
+		if (flash->timer <= 0) {
+			continue;
+		}
+		// Fades out quickly, with a quick bright start
+		float t = flash->timer / FLASH_LIGHT_DURATION;
+		float intensity = t * t;
+		race_lights_insert(lights, distances, &lights_len, (render_light_t){
+			.pos = flash->pos,
+			.color = vec3_mulf(flash->color, intensity),
+			.radius = 3600
+		});
+	}
+
+	render_set_lights(lights, min(lights_len, LIGHTS_MAX_ACTIVE));
 }
 
 void race_init(void) {
@@ -138,6 +204,7 @@ void race_update(void) {
 		}
 		weapons_update();
 		particles_update();
+		race_update_flash_lights();
 		scene_update();
 		if (g.race_type != RACE_TYPE_TIME_TRIAL) {
 			track_cycle_pickups();

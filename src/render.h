@@ -22,6 +22,7 @@ typedef enum {
 	RENDER_POST_BLOOM = (1<<1),
 	RENDER_POST_MOTION_BLUR = (1<<2),
 	RENDER_POST_LIGHTING = (1<<3),
+	RENDER_POST_POINT_LIGHTS = (1<<4),
 } render_post_effect_t;
 
 // Materials for the (approximated) PBR lighting. Anything drawn with
