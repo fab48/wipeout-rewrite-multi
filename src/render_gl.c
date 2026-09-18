@@ -109,6 +109,17 @@ static GLuint create_program(const char *vs_source, const char *fs_source) {
 	glAttachShader(program, vs);
 	glAttachShader(program, fs);
 	glLinkProgram(program);
+
+	GLint success;
+	glGetProgramiv(program, GL_LINK_STATUS, &success);
+	if (!success) {
+		int log_written;
+		char log[512];
+		glGetProgramInfoLog(program, 512, &log_written, log);
+		die("Error linking shader program: %s
+", log);
+	}
+
 	glUseProgram(program);
 	return program;
 }
@@ -143,7 +154,7 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	uniform mat4 view;
 	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2
 	uniform vec3 lights_color[6];
-	uniform int lights_len;
+	uniform float lights_len; // float: an int would have a different default precision in the two shaders
 	uniform mat4 model;
 	uniform mat4 projection;
 	uniform vec2 screen;
@@ -160,13 +171,13 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 		// Point lights (exhausts, explosions) are cheap per vertex lights;
 		// diffuse only. Geometry without normals (sprites, 2d) gets none.
 		v_pointlight = vec3(0.0);
-		if (dot(v_normal, v_normal) > 0.25 && lights_len > 0) {
+		if (dot(v_normal, v_normal) > 0.25 && lights_len > 0.5) {
 			vec3 n = normalize(v_normal);
 			if (dot(n, -v_pos) < 0.0) {
 				n = -n;
 			}
 			for (int i = 0; i < 6; i++) {
-				if (i >= lights_len) {
+				if (float(i) >= lights_len) {
 					break;
 				}
 				if (lights_pos[i].w < 0.0) {
@@ -208,7 +219,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 	varying vec3 v_pointlight;
 	uniform vec4 lights_pos[6]; // view space, w = 1 / radius^2, negative = per pixel
 	uniform vec3 lights_color[6];
-	uniform int lights_len;
+	uniform float lights_len; // float: an int would have a different default precision in the two shaders
 
 	void main(void) {
 		// Smooth vertex normal if the geometry has one, otherwise a flat face
@@ -308,7 +319,7 @@ static const char * const SHADER_GAME_FS = SHADER_SOURCE_DERIVATIVES(
 
 			// Small per pixel lights (the exhausts): diffuse and specular
 			for (int i = 0; i < 6; i++) {
-				if (i >= lights_len) {
+				if (float(i) >= lights_len) {
 					break;
 				}
 				if (lights_pos[i].w > 0.0) {
@@ -802,7 +813,7 @@ void render_init(vec2i_t screen_size) {
 	prg_game = shader_game_init();
 	use_program(prg_game);
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
-	glUniform1i(prg_game->uniform.lights_len, 0);
+	glUniform1f(prg_game->uniform.lights_len, 0);
 
 	render_set_view(vec3(0, 0, 0), vec3(0, 0, 0));
 	render_set_model_mat(&mat4_identity());
@@ -1252,7 +1263,7 @@ void render_set_lights(render_light_t *lights, int len) {
 		glUniform4fv(prg_game->uniform.lights_pos, len, pos);
 		glUniform3fv(prg_game->uniform.lights_color, len, color);
 	}
-	glUniform1i(prg_game->uniform.lights_len, len);
+	glUniform1f(prg_game->uniform.lights_len, len);
 }
 
 void render_set_view_2d(void) {
