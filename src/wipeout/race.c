@@ -501,11 +501,14 @@ void race_release_control(void) {
 // screen the race goes on until everybody is done.
 void race_player_finished(ship_t *ship) {
 	g.finish_rank[ship->player] = ship->position_rank;
+
+	// Split screen: the first player over the line wins, the race is over for
+	// both. race_end() releases the loser too: autopilot and cinematic camera.
 	if (g.num_players > 1) {
-		race_release_ship(ship);
 		for (int p = 0; p < g.num_players; p++) {
-			if (flags_is(game_player_ship(p)->flags, SHIP_RACING)) {
-				return;
+			ship_t *other = game_player_ship(p);
+			if (other != ship) {
+				g.finish_rank[p] = other->position_rank;
 			}
 		}
 	}
