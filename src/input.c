@@ -312,6 +312,12 @@ void input_bind(input_layer_t layer, button_t button, uint8_t action) {
 	clear(expected_button);
 }
 
+bool input_is_stick_direction(button_t button) {
+	return
+		(button >= INPUT_GAMEPAD_L_STICK_UP && button <= INPUT_GAMEPAD_R_STICK_RIGHT) ||
+		(button >= INPUT_GAMEPAD2_L_STICK_UP && button <= INPUT_GAMEPAD2_R_STICK_RIGHT);
+}
+
 uint8_t input_bound_to_action(button_t button) {
 	error_if(button < 0 || button >= INPUT_BUTTON_MAX, "Invalid input button %d", button);
 	return bindings[INPUT_LAYER_USER][button];

@@ -195,6 +195,10 @@ void input_unbind_all(input_layer_t layer);
 
 uint8_t input_bound_to_action(button_t button);
 
+// True for a stick direction (left or right stick, either gamepad). These are
+// fixed bindings (left stick steers) and can't be assigned in the menu.
+bool input_is_stick_direction(button_t button);
+
 void input_set_button_state(button_t button, float state);
 void input_set_gamepad_swap(bool swap);
 

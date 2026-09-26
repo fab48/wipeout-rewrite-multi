@@ -842,6 +842,31 @@ static game_scene_t scene_next = GAME_SCENE_NONE;
 static int global_textures_len = 0;
 static void *global_mem_mark = 0;
 
+// The built in button tables, kept before the save files overwrite them
+static uint8_t default_buttons_p1[NUM_GAME_ACTIONS][2];
+static uint8_t default_buttons_p2[NUM_GAME_ACTIONS][2];
+
+// Replace stick directions in a loaded button table by the default button of
+// that slot (or nothing, if that button is already used by another action)
+static void game_sanitize_buttons(uint8_t buttons[NUM_GAME_ACTIONS][2], uint8_t defaults[NUM_GAME_ACTIONS][2], bool *is_dirty) {
+	for (int action = 0; action < NUM_GAME_ACTIONS; action++) {
+		for (int i = 0; i < 2; i++) {
+			if (!input_is_stick_direction(buttons[action][i])) {
+				continue;
+			}
+			uint8_t replacement = defaults[action][i];
+			for (int other = 0; other < NUM_GAME_ACTIONS; other++) {
+				if (buttons[other][i] == replacement) {
+					replacement = INPUT_INVALID;
+				}
+			}
+			printf("controls: removed stick binding from action %d\n", action);
+			buttons[action][i] = replacement;
+			*is_dirty = true;
+		}
+	}
+}
+
 void game_init(void) {
 	error_if(!platform_asset_exists("wipeout/track01/"), "Wipeout game content missing. Check your wipeout/ directory.\n");
 	if (platform_asset_exists("wipeout2/track01/") || platform_asset_exists("wipeout64/track01/")) {
@@ -858,6 +883,8 @@ void game_init(void) {
 	printf("\n");
 
 	uint32_t size;
+	memcpy(default_buttons_p1, save.buttons, sizeof(default_buttons_p1));
+	memcpy(default_buttons_p2, save2.buttons, sizeof(default_buttons_p2));
 	save_t *save_file = (save_t *)platform_load_userdata("save.dat", &size);
 	if (save_file) {
 		if (size == sizeof(save_t) && save_file->magic == SAVE_DATA_MAGIC) {
@@ -941,6 +968,12 @@ void game_init(void) {
 	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD_START, A_MENU_START);
 	
 
+	// Saves from earlier versions may have a stick direction bound to some
+	// action (captured by accident in the controls menu). That direction then
+	// no longer steered, e.g. the ship wouldn't turn right with the stick.
+	// Put the default button back in those slots.
+	game_sanitize_buttons(save.buttons, default_buttons_p1, &save.is_dirty);
+
 	// User defined, loaded from the save struct
 	for (int action = 0; action < len(save.buttons); action++) {
 		if (save.buttons[action][0] != INPUT_INVALID) {
@@ -953,20 +986,18 @@ void game_init(void) {
 
 
 	// Modern gamepad layout for player 1, on top of the classic PS1 style
-	// bindings: left stick steers, right trigger is the thrust, left trigger
-	// fires. Only for buttons the player hasn't bound to something else.
-	static const struct { button_t button; uint8_t action; } p1_analog[] = {
-		{INPUT_GAMEPAD_L_STICK_UP, A_UP},
-		{INPUT_GAMEPAD_L_STICK_DOWN, A_DOWN},
-		{INPUT_GAMEPAD_L_STICK_LEFT, A_LEFT},
-		{INPUT_GAMEPAD_L_STICK_RIGHT, A_RIGHT},
-		{INPUT_GAMEPAD_R_TRIGGER, A_THRUST},
-		{INPUT_GAMEPAD_L_TRIGGER, A_FIRE},
-	};
-	for (int i = 0; i < len(p1_analog); i++) {
-		if (input_bound_to_action(p1_analog[i].button) == INPUT_ACTION_NONE) {
-			input_bind(INPUT_LAYER_USER, p1_analog[i].button, p1_analog[i].action);
-		}
+	// bindings. The left stick always steers (like player 2's); the right
+	// trigger is the thrust and the left trigger fires, unless the player
+	// bound those triggers to something else.
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_L_STICK_UP, A_UP);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_L_STICK_DOWN, A_DOWN);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_L_STICK_LEFT, A_LEFT);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_L_STICK_RIGHT, A_RIGHT);
+	if (input_bound_to_action(INPUT_GAMEPAD_R_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_R_TRIGGER, A_THRUST);
+	}
+	if (input_bound_to_action(INPUT_GAMEPAD_L_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD_L_TRIGGER, A_FIRE);
 	}
 
 	// Player 2
@@ -977,10 +1008,11 @@ void game_init(void) {
 		}
 		mem_temp_free(save2_file);
 	}
+	game_sanitize_buttons(save2.buttons, default_buttons_p2, &save2.is_dirty);
 	game_bind_player2_controls();
 
 	// The left stick of the second gamepad always steers, it can't be bound
-	// through the menu (it is not reported as a button)
+	// through the menu (stick directions are ignored there)
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_UP, A_P2_UP);
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN);
 	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT);

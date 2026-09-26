@@ -184,6 +184,13 @@ void button_capture(void *user, button_t button, int32_t ascii_char) {
 		return;
 	}
 
+	// Stick directions always steer and can't be assigned: a stick that was
+	// merely touched while waiting used to steal e.g. "right" from the
+	// steering, and that got saved.
+	if (input_is_stick_direction(button)) {
+		return;
+	}
+
 	menu_t *menu = (menu_t *)user;
 	if (button == INPUT_KEY_ESCAPE) {
 		input_capture(NULL, NULL);
