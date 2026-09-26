@@ -2,6 +2,7 @@
 #include "../system.h"
 
 #include "object.h"
+#include "ship.h"
 #include "scene.h"
 #include "camera.h"
 #include "game.h"
@@ -43,6 +44,19 @@ static struct {
 void scene_pulsate_red_light(Object *obj);
 void scene_move_oil_pump(Object *obj);
 void scene_update_aurora_borealis(void);
+
+// Marks the first primitives of an object (the colored light polys) to be 
+// drawn again additively, so they glow and bloom
+static void scene_mark_glow_primitives(Object *obj, int count) {
+	Prm poly = {.primitive = obj->primitives};
+	for (int i = 0; i < count && i < obj->primitives_len; i++) {
+		if (poly.primitive->type != PRM_TYPE_GT4) {
+			break;
+		}
+		flags_add(poly.primitive->flag, PRM_GLOW);
+		poly.gt4++;
+	}
+}
 
 void scene_load(const char *base_path, float sky_y_offset) {
 	bool multiplayer = false;
@@ -90,10 +104,12 @@ void scene_load(const char *base_path, float sky_y_offset) {
 		if (str_starts_with(obj->name, "start")) {
 			error_if(start_booms_len >= SCENE_START_BOOMS_MAX, "SCENE_START_BOOMS_MAX reached");
 			start_booms[start_booms_len++] = obj;
+			scene_mark_glow_primitives(obj, 3); // the three lights
 		}
 		else if (str_starts_with(obj->name, "redl")) {
 			error_if(red_lights_len >= SCENE_RED_LIGHTS_MAX, "SCENE_RED_LIGHTS_MAX reached");
 			red_lights[red_lights_len++] = obj;
+			scene_mark_glow_primitives(obj, 1);
 		}
 		else if (str_starts_with(obj->name, "donkey")) {
 			error_if(oil_pumps_len >= SCENE_OIL_PUMPS_MAX, "SCENE_OIL_PUMPS_MAX reached");
@@ -136,32 +152,90 @@ void scene_update(void) {
 	}
 }
 
+// Draws the sky into the reflection cubemap, seen from the origin
+void scene_render_sky_env(void) {
+	mat4_set_translation(&sky_object->mat, sky_offset);
+	for (int face = 0; face < 6; face++) {
+		render_env_begin(face);
+		object_draw(sky_object, &sky_object->mat);
+		render_env_end();
+	}
+	render_env_finish();
+}
+
+// A halo sprite at the center of each glowing (PRM_GLOW) polygon of an object
+static void scene_draw_light_halos(Object *obj) {
+	Prm poly = {.primitive = obj->primitives};
+	for (int i = 0; i < obj->primitives_len; i++) {
+		if (poly.primitive->type != PRM_TYPE_GT4) {
+			break; // the glow polys are always the first ones
+		}
+		if (flags_is(poly.primitive->flag, PRM_GLOW)) {
+			rgba_t color = poly.gt4->color[0];
+			int brightness = max(color.r, max(color.g, color.b));
+			if (brightness > 64) { // the "off" lights are dark grey
+				vec3_t center = vec3(0, 0, 0);
+				for (int v = 0; v < 4; v++) {
+					center = vec3_add(center, obj->vertices[poly.gt4->coords[v]]);
+				}
+				center = vec3_transform(vec3_mulf(center, 0.25), &obj->mat);
+				color.a = 200;
+				render_push_sprite(center, vec2i(520, 520), color, ship_exhaust_flare_texture());
+			}
+		}
+		poly.gt4++;
+	}
+}
+
 void scene_draw(camera_t *camera) {
 	// Sky
+	render_set_material(RENDER_MATERIAL_SKY);
 	render_set_depth_write(false);
 	mat4_set_translation(&sky_object->mat, vec3_add(camera->position, sky_offset));
 	object_draw(sky_object, &sky_object->mat);
 	render_set_depth_write(true);
 
 	// Objects
+	render_set_material(RENDER_MATERIAL_SCENE);
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.
-	vec3_t cam_dir = camera_forward(camera);
+	camera_view_cone_t cone = camera_view_cone(camera);
 	Object *object = scene_objects;
-	
+
 	while (object) {
-		vec3_t diff = vec3_sub(camera->position, object->origin);
-		float cam_dot = vec3_dot(diff, cam_dir);
-		float dist_sq = vec3_dot(diff, diff);
-		if (
-			cam_dot < object->radius && 
-			dist_sq < (RENDER_FADEOUT_FAR * RENDER_FADEOUT_FAR)
-		) {
+		if (camera_view_cone_has_sphere(&cone, object->origin, object->radius)) {
 			object_draw(object, &object->mat);
 		}
 		object = object->next;
 	}
+
+	// The lights (start booms, red beacons) again, additive: brighter and
+	// they feed the bloom
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-1.0); // just enough to win against the coplanar geometry; a large offset lets the glow show through the road in banked curves
+	for (int i = 0; i < start_booms_len; i++) {
+		object_draw_filtered(start_booms[i], &start_booms[i]->mat, PRM_GLOW, true);
+	}
+	for (int i = 0; i < red_lights_len; i++) {
+		object_draw_filtered(red_lights[i], &red_lights[i]->mat, PRM_GLOW, true);
+	}
+
+	// Plus a big soft halo sprite on each lit light, so that it has enough
+	// footprint on screen to feed the bloom
+	render_set_model_mat(&mat4_identity());
+	for (int i = 0; i < start_booms_len; i++) {
+		scene_draw_light_halos(start_booms[i]);
+	}
+	for (int i = 0; i < red_lights_len; i++) {
+		scene_draw_light_halos(red_lights[i]);
+	}
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
+	render_set_material(RENDER_MATERIAL_SCENE);
 }
 
 rgba_t start_boom_color_off = rgba(0x20, 0x20, 0x20, 0xff);

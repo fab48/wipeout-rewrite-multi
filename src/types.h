@@ -50,6 +50,7 @@ typedef struct {
 	vec3_t pos;
 	vec2_t uv;
 	rgba_t color;
+	vec3_t normal; // optional; zero = use flat face normals for lighting
 } vertex_t;
 
 typedef struct {

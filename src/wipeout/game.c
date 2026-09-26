@@ -7,6 +7,7 @@
 #include "../input.h"
 
 #include "game.h"
+#include "settings.h"
 #include "ship.h"
 #include "weapon.h"
 #include "droid.h"
@@ -579,6 +580,22 @@ const game_def_t def = {
 	}
 };
 
+save2_t save2 = {
+	.magic = SAVE2_DATA_MAGIC,
+	.is_dirty = false,
+	.buttons = {
+		[A_UP] = {INPUT_KEY_I, INPUT_GAMEPAD2_DPAD_UP},
+		[A_DOWN] = {INPUT_KEY_K, INPUT_GAMEPAD2_DPAD_DOWN},
+		[A_LEFT] = {INPUT_KEY_J, INPUT_GAMEPAD2_DPAD_LEFT},
+		[A_RIGHT] = {INPUT_KEY_L, INPUT_GAMEPAD2_DPAD_RIGHT},
+		[A_BRAKE_LEFT] = {INPUT_KEY_COMMA, INPUT_GAMEPAD2_L_SHOULDER},
+		[A_BRAKE_RIGHT] = {INPUT_KEY_PERIOD, INPUT_GAMEPAD2_R_SHOULDER},
+		[A_THRUST] = {INPUT_KEY_N, INPUT_GAMEPAD2_A},
+		[A_FIRE] = {INPUT_KEY_B, INPUT_GAMEPAD2_X},
+		[A_CHANGE_VIEW] = {INPUT_KEY_O, INPUT_GAMEPAD2_Y},
+	},
+};
+
 save_t save = {
 	.magic = SAVE_DATA_MAGIC,
 	.is_dirty = true,
@@ -591,7 +608,7 @@ save_t save = {
 	.draw_stats = DRAW_STATS_OFF,
 	.fullscreen = false,
 	.screen_res = 0,
-	.post_effect = 0,
+	.post_effect = GAME_DEFAULT_POST_EFFECT,
 
 	.has_rapier_class = true,  // for testing; should be false in prod
 	.has_bonus_circuits = true, // for testing; should be false in prod
@@ -846,6 +863,12 @@ void game_init(void) {
 		if (size == sizeof(save_t) && save_file->magic == SAVE_DATA_MAGIC) {
 			printf("load save data success\n");
 			memcpy(&save, save_file, sizeof(save_t));
+
+			// A save that never had any post effect configured gets the new
+			// defaults (all on)
+			if (save.post_effect == 0) {
+				save.post_effect = GAME_DEFAULT_POST_EFFECT;
+			}
 		}
 		else {
 			printf("unexpected size/magic for save data\n");
@@ -855,7 +878,8 @@ void game_init(void) {
 
 	platform_set_fullscreen(save.fullscreen);
 	render_set_resolution(save.screen_res);
-	render_set_post_effect(save.post_effect);
+	settings_load();
+	settings_apply();
 
 	srand((int)(platform_now() * 100));
 	
@@ -928,7 +952,82 @@ void game_init(void) {
 	}
 
 
+	// Modern gamepad layout for player 1, on top of the classic PS1 style
+	// bindings: left stick steers, right trigger is the thrust, left trigger
+	// fires. Only for buttons the player hasn't bound to something else.
+	static const struct { button_t button; uint8_t action; } p1_analog[] = {
+		{INPUT_GAMEPAD_L_STICK_UP, A_UP},
+		{INPUT_GAMEPAD_L_STICK_DOWN, A_DOWN},
+		{INPUT_GAMEPAD_L_STICK_LEFT, A_LEFT},
+		{INPUT_GAMEPAD_L_STICK_RIGHT, A_RIGHT},
+		{INPUT_GAMEPAD_R_TRIGGER, A_THRUST},
+		{INPUT_GAMEPAD_L_TRIGGER, A_FIRE},
+	};
+	for (int i = 0; i < len(p1_analog); i++) {
+		if (input_bound_to_action(p1_analog[i].button) == INPUT_ACTION_NONE) {
+			input_bind(INPUT_LAYER_USER, p1_analog[i].button, p1_analog[i].action);
+		}
+	}
+
+	// Player 2
+	save2_t *save2_file = (save2_t *)platform_load_userdata("controls2.dat", &size);
+	if (save2_file) {
+		if (size == sizeof(save2_t) && save2_file->magic == SAVE2_DATA_MAGIC) {
+			memcpy(&save2, save2_file, sizeof(save2_t));
+		}
+		mem_temp_free(save2_file);
+	}
+	game_bind_player2_controls();
+
+	// The left stick of the second gamepad always steers, it can't be bound
+	// through the menu (it is not reported as a button)
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_UP, A_P2_UP);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_DOWN, A_P2_DOWN);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_LEFT, A_P2_LEFT);
+	input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_STICK_RIGHT, A_P2_RIGHT);
+	if (input_bound_to_action(INPUT_GAMEPAD2_R_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_R_TRIGGER, A_P2_THRUST);
+	}
+	if (input_bound_to_action(INPUT_GAMEPAD2_L_TRIGGER) == INPUT_ACTION_NONE) {
+		input_bind(INPUT_LAYER_USER, INPUT_GAMEPAD2_L_TRIGGER, A_P2_FIRE);
+	}
+
+	// Player 2's keys navigate the menus too (I/K/J/L, N select, B back)
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_I, A_MENU_UP);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_K, A_MENU_DOWN);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_J, A_MENU_LEFT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_L, A_MENU_RIGHT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_N, A_MENU_SELECT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_B, A_MENU_BACK);
+
+	// F3: compare with and without all the render effects
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_KEY_F3, A_TOGGLE_FX);
+
+	// The second gamepad can pause and navigate the menus, too
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_UP, A_MENU_UP);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_DOWN, A_MENU_DOWN);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_LEFT, A_MENU_LEFT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_DPAD_RIGHT, A_MENU_RIGHT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_B, A_MENU_BACK);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_A, A_MENU_SELECT);
+	input_bind(INPUT_LAYER_SYSTEM, INPUT_GAMEPAD2_START, A_MENU_START);
+
+	g.num_players = 1;
+	g.view_player = 0;
+	g.camera = &g.cameras[0];
+	settings_apply();
+
 	game_set_scene(GAME_SCENE_INTRO);
+}
+
+void game_bind_player2_controls(void) {
+	for (int action = 0; action < len(save2.buttons); action++) {
+		for (int i = 0; i < 2; i++) {
+			if (save2.buttons[action][i] != INPUT_INVALID) {
+				input_bind(INPUT_LAYER_USER, save2.buttons[action][i], A_P2_UP + action);
+			}
+		}
+	}
 }
 
 void game_set_scene(game_scene_t scene) {
@@ -978,12 +1077,32 @@ void game_update(void) {
 		save.is_dirty = true;
 	}
 
+	// F3 toggles every render effect (post FX, lighting, point lights,
+	// tonemapping) without touching the save, to compare before/after
+	static bool fx_disabled = false;
+	if (input_pressed(A_TOGGLE_FX)) {
+		fx_disabled = !fx_disabled;
+		int kept = settings_post_flags() & (RENDER_POST_SPLIT_VERTICAL | RENDER_POST_SWAP_GAMEPADS | RENDER_POST_EXTERNAL_VIEW | RENDER_POST_DRAW_DISTANCE_MASK);
+		render_set_post_effect(fx_disabled ? (kept | RENDER_POST_NO_TONEMAP) : settings_post_flags());
+	}
+	if (fx_disabled) {
+		render_set_view_2d();
+		ui_draw_text("FX OFF", ui_scaled_pos(UI_POS_TOP | UI_POS_CENTER, vec2i(-24, 4)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
+
+	settings_store_if_dirty();
+
 	if (save.is_dirty) {
 		// FIXME: use a text based format?
 		// FIXME: this should probably run async somewhere
 		save.is_dirty = false;
 		platform_store_userdata("save.dat", &save, sizeof(save_t));
 		printf("wrote save.dat\n");
+	}
+	if (save2.is_dirty) {
+		save2.is_dirty = false;
+		platform_store_userdata("controls2.dat", &save2, sizeof(save2_t));
+		printf("wrote controls2.dat\n");
 	}
 
 	double now = platform_now();

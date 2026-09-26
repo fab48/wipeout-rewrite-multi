@@ -12,13 +12,42 @@ typedef enum {
 	RENDER_RES_NATIVE,
 	RENDER_RES_240P,
 	RENDER_RES_480P,
+	RENDER_RES_720P,
 } render_resolution_t;
 
 typedef enum {
-	RENDER_POST_NONE,
-	RENDER_POST_CRT,
-	NUM_RENDER_POST_EFFECTS,
+	// These are flags and can be combined
+	RENDER_POST_NONE = 0,
+	RENDER_POST_CRT = (1<<0),
+	RENDER_POST_BLOOM = (1<<1),
+	RENDER_POST_MOTION_BLUR = (1<<2),
+	RENDER_POST_LIGHTING = (1<<3),
+	// Number of point lights (0..6), stored in three bits
+	RENDER_POST_POINT_LIGHTS_SHIFT = 4,
+	RENDER_POST_POINT_LIGHTS_MASK = (7<<4),
+	// Bloom threshold preset (0..3), two bits
+	RENDER_POST_BLOOM_THRESHOLD_SHIFT = 7,
+	RENDER_POST_BLOOM_THRESHOLD_MASK = (3<<7),
+	RENDER_POST_NO_TONEMAP = (1<<9), // inverted, so that old saves keep the tonemapping on
+	RENDER_POST_SPLIT_VERTICAL = (1<<10), // split screen side by side instead of top/bottom
+	RENDER_POST_SWAP_GAMEPADS = (1<<11), // gamepad 1 controls player 2 and vice versa
+	RENDER_POST_EXTERNAL_VIEW = (1<<12), // start races in the external view
+	// Draw distance preset (0..3), two bits: FULL, FAR, MEDIUM, NEAR
+	RENDER_POST_DRAW_DISTANCE_SHIFT = 13,
+	RENDER_POST_DRAW_DISTANCE_MASK = (3<<13),
 } render_post_effect_t;
+
+// Materials for the (approximated) PBR lighting. Anything drawn with
+// RENDER_BLEND_LIGHTER is always unlit.
+typedef enum {
+	RENDER_MATERIAL_UNLIT,
+	RENDER_MATERIAL_DEFAULT,
+	RENDER_MATERIAL_TRACK,
+	RENDER_MATERIAL_SCENE,
+	RENDER_MATERIAL_SHIP,
+	RENDER_MATERIAL_SKY, // unlit; marked in the bloom mask so the sky blooms less
+	NUM_RENDER_MATERIALS,
+} render_material_t;
 
 typedef struct {
 	uint32_t num_tris;
@@ -38,10 +67,25 @@ void render_cleanup(void);
 void render_set_screen_size(vec2i_t size);
 void render_set_resolution(render_resolution_t res);
 void render_set_post_effect(render_post_effect_t post);
+render_post_effect_t render_get_post_effect(void); // the effective one (may differ from the save with the F3 toggle)
+
+// Multipliers for the effects, 1.0 = default
+void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness);
 vec2i_t render_size(void);
+
+// Restrict all drawing to a part of the screen (for split screen). pos is the
+// top left corner. render_size() returns the size of the current viewport.
+// Call render_set_view() or render_set_view_2d() afterwards.
+void render_set_viewport(vec2i_t pos, vec2i_t size);
+void render_reset_viewport(void);
 
 void render_frame_prepare(void);
 void render_frame_end(void);
+
+// Applies the scene post effects (motion blur, bloom) to everything drawn so
+// far in this frame. Call this after the 3d scene, but before drawing the HUD.
+// motion_blur is 0..1
+void render_scene_post(float motion_blur);
 // render_stats_t owned by the renderer
 const render_stats_t* render_frame_get_stats(void);
 
@@ -53,6 +97,28 @@ void render_set_depth_test(bool enabled);
 void render_set_depth_offset(float offset);
 void render_set_screen_position(vec2_t pos);
 void render_set_blend_mode(render_blend_mode_t mode);
+void render_set_material(render_material_t material);
+
+// Point lights for the PBR lighting; world space. Call after render_set_view().
+#define RENDER_LIGHTS_MAX 6
+typedef struct {
+	vec3_t pos;
+	vec3_t color; // 1.0 = as bright as the sun
+	float radius;
+	bool per_pixel; // per pixel with specular (small lights) or per vertex diffuse (big ones)
+} render_light_t;
+void render_set_lights(render_light_t *lights, int len);
+
+// Environment (sky) reflection cubemap. Draw the sky between begin/end for
+// each of the 6 faces (GL order: +X -X +Y -Y +Z -Z), from the origin.
+void render_env_begin(int face);
+void render_env_end(void);
+void render_env_finish(void); // after the last face; enables the reflection
+void render_env_clear(void); // back to the procedural sky gradient
+
+// Draw distance, as a factor of RENDER_FADEOUT_FAR (1.0 = everything)
+void render_set_draw_distance(float factor);
+float render_draw_distance(void); // in world units
 void render_set_cull_backface(bool enabled);
 
 vec3_t render_transform(vec3_t pos);

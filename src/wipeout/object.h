@@ -296,6 +296,7 @@ typedef struct InfiniteLight {
 #define PRM_SINGLE_SIDED 0x0001
 #define PRM_SHIP_ENGINE  0x0002
 #define PRM_TRANSLUCENT  0x0004
+#define PRM_GLOW         0x4000 // our own: drawn a second time, additive (lights)
 
 // Altering this enum (other than adding to the end)
 // will break compatibility with the assets.
@@ -343,6 +344,7 @@ typedef struct Object {
 	Primitive *primitives; // Pointer to Z Sort Primitives
 
 	vec3_t origin;
+	vec3_t *smooth_normals; // per vertex, computed at load time for the lighting
 	int32_t extent; // Flags for object characteristics
 	int16_t flags; // Next object in list
 	float radius;
@@ -382,5 +384,9 @@ typedef union Prm {
 
 Object *objects_load(char *name, texture_list_t tl);
 void object_draw(Object *object, mat4_t *mat);
+void object_compute_smooth_normals(Object *object);
+void object_compute_smooth_normals(Object *object);
+void object_compute_smooth_normals(Object *object);
+void object_draw_filtered(Object *object, mat4_t *mat, int16_t flag_mask, bool with_flag);
 
 #endif

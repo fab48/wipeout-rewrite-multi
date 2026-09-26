@@ -1,3 +1,4 @@
+#include <string.h>
 #include "../utils.h"
 #include "../system.h"
 #include "../mem.h"
@@ -7,6 +8,7 @@
 #include "menu.h"
 #include "main_menu.h"
 #include "game.h"
+#include "settings.h"
 #include "image.h"
 #include "ui.h"
 
@@ -14,6 +16,7 @@ static void page_main_init(menu_t *menu);
 static void page_options_init(menu_t *menu);
 static void page_race_class_init(menu_t *menu);
 static void page_race_type_init(menu_t *menu);
+static void page_opponents_init(menu_t *menu);
 static void page_team_init(menu_t *menu);
 static void page_pilot_init(menu_t *menu);
 static void page_circuit_init(menu_t *menu);
@@ -50,6 +53,8 @@ static void draw_model(Object *model, vec2_t offset, vec3_t pos, float rotation)
 // Main Menu
 
 static void button_start_game(menu_t *menu, int data) {
+	g.num_players = 1;
+	g.duel = false;
 	page_race_class_init(menu);
 }
 
@@ -75,7 +80,19 @@ static void page_main_draw(menu_t *menu, int data) {
 		case 0: draw_model(g.ships[0].model, vec2(0, -0.1), vec3(0, 0, -700), system_cycle_time()); break;
 		case 1: draw_model(models.misc.options, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time()); break;
 		case 2: draw_model(models.misc.msdos, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time()); break;
+		case 3:
+			draw_model(g.ships[0].model, vec2(-0.2, -0.1), vec3(0, 0, -900), system_cycle_time());
+			draw_model(g.ships[2].model, vec2( 0.2, -0.1), vec3(0, 0, -900), system_cycle_time() + 2.0);
+			break;
 	}
+}
+
+static void button_two_players(menu_t *menu, int data) {
+	g.num_players = 2;
+	g.duel = false;
+	g.race_type = RACE_TYPE_SINGLE;
+	g.highscore_tab = HIGHSCORE_TAB_RACE;
+	page_race_class_init(menu);
 }
 
 static void page_main_init(menu_t *menu) {
@@ -87,6 +104,7 @@ static void page_main_init(menu_t *menu) {
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
 
 	menu_page_add_button(page, 0, "START GAME", button_start_game);
+	menu_page_add_button(page, 3, "TWO PLAYERS", button_two_players);
 	menu_page_add_button(page, 1, "OPTIONS", button_options);
 
 	#ifndef __EMSCRIPTEN__
@@ -143,7 +161,23 @@ static void page_options_init(menu_t *menu) {
 
 static const char *button_names[NUM_GAME_ACTIONS][2] = {};
 static int control_current_action;
+static int control_current_player = 0;
+static char *controls_player2_title = "PLAYER 2 CONTROLS";
 static float await_input_deadline;
+
+// The button table that is being edited
+static uint8_t (*control_buttons(void))[2] {
+	return control_current_player == 1 ? save2.buttons : save.buttons;
+}
+
+static void control_set_dirty(void) {
+	if (control_current_player == 1) {
+		save2.is_dirty = true;
+	}
+	else {
+		save.is_dirty = true;
+	}
+}
 
 void button_capture(void *user, button_t button, int32_t ascii_char) {
 	if (button == INPUT_INVALID) {
@@ -158,17 +192,31 @@ void button_capture(void *user, button_t button, int32_t ascii_char) {
 	}
 
 	int index = button < INPUT_KEY_MAX ? 0 : 1; // joypad or keyboard
+	uint8_t (*buttons)[2] = control_buttons();
+	int action = control_current_player == 1 ? A_P2_UP + control_current_action : control_current_action;
 
-	// unbind this button if it's bound anywhere
-	for (int i = 0; i < len(save.buttons); i++) {
+	// unbind this button if it's bound anywhere (for either player)
+	for (int i = 0; i < NUM_GAME_ACTIONS; i++) {
 		if (save.buttons[i][index] == button) {
 			save.buttons[i][index] = INPUT_INVALID;
+			save.is_dirty = true;
+		}
+		if (save2.buttons[i][index] == button) {
+			save2.buttons[i][index] = INPUT_INVALID;
+			save2.is_dirty = true;
 		}
 	}
+	input_unbind(INPUT_LAYER_USER, button);
+
+	// unbind the button previously used for this action
+	if (buttons[control_current_action][index] != INPUT_INVALID) {
+		input_unbind(INPUT_LAYER_USER, buttons[control_current_action][index]);
+	}
+
 	input_capture(NULL, NULL);
-	input_bind(INPUT_LAYER_USER, button, control_current_action);
-	save.buttons[control_current_action][index] = button;
-	save.is_dirty = true;
+	input_bind(INPUT_LAYER_USER, button, action);
+	buttons[control_current_action][index] = button;
+	control_set_dirty();
 	menu_pop(menu);
 }
 
@@ -199,6 +247,9 @@ static void page_options_controls_set_init(menu_t *menu, int data) {
 static void page_options_control_draw(menu_t *menu, int data) {
 	menu_page_t *page = &menu->pages[menu->index];
 
+	// Both the player 1 and the player 2 page use this draw function
+	control_current_player = (page->title == controls_player2_title) ? 1 : 0;
+
 	int left = page->items_pos.x + page->block_width - 100;
 	int right = page->items_pos.x + page->block_width;
 	int line_y = page->items_pos.y - 20;
@@ -210,22 +261,23 @@ static void page_options_control_draw(menu_t *menu, int data) {
 	ui_draw_text("JOYSTICK", ui_scaled_pos(page->items_anchor, right_head_pos), UI_SIZE_8, UI_COLOR_DEFAULT);
 	line_y += 20;
 
+	uint8_t (*buttons)[2] = control_buttons();
 	for (int action = 0; action < NUM_GAME_ACTIONS; action++) {
 		rgba_t text_color = UI_COLOR_DEFAULT;
 		if (action == page->index) {
 			text_color = UI_COLOR_ACCENT;
 		}
 
-		if (save.buttons[action][0] != INPUT_INVALID) {
-			const char *name = input_button_to_name(save.buttons[action][0]);
+		if (buttons[action][0] != INPUT_INVALID) {
+			const char *name = input_button_to_name(buttons[action][0]);
 			if (!name) {
 				name = "UNKNWN";
 			}
 			vec2i_t pos = vec2i(left - ui_text_width(name, UI_SIZE_8), line_y);
 			ui_draw_text(name, ui_scaled_pos(page->items_anchor, pos), UI_SIZE_8, text_color);
 		}
-		if (save.buttons[action][1] != INPUT_INVALID) {
-			const char *name = input_button_to_name(save.buttons[action][1]);
+		if (buttons[action][1] != INPUT_INVALID) {
+			const char *name = input_button_to_name(buttons[action][1]);
 			if (!name) {
 				name = "UNKNWN";
 			}
@@ -243,8 +295,26 @@ static void toggle_analog_response(menu_t *menu, int data) {
 
 static const char *analog_response[] = {"LINEAR", "MODERATE", "HEAVY"};
 
+static void page_options_controls_init_for_player(menu_t *menu, int player);
+
+static const char *opts_swap_gamepads[] = {"OFF", "ON"};
+
+static void toggle_swap_gamepads(menu_t *menu, int data) {
+	settings.swap_gamepads = data;
+	settings_set_dirty();
+}
+
+static void button_player2_controls(menu_t *menu, int data) {
+	page_options_controls_init_for_player(menu, 1);
+}
+
 static void page_options_controls_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "CONTROLS", page_options_control_draw);
+	page_options_controls_init_for_player(menu, 0);
+}
+
+static void page_options_controls_init_for_player(menu_t *menu, int player) {
+	control_current_player = player;
+	menu_page_t *page = menu_push(menu, player == 1 ? controls_player2_title : "CONTROLS", page_options_control_draw);
 	flags_set(page->layout_flags, MENU_VERTICAL | MENU_FIXED);
 	page->title_pos = vec2i(-160, -100);
 	page->title_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
@@ -264,7 +334,11 @@ static void page_options_controls_init(menu_t *menu) {
 	menu_page_add_button(page, A_FIRE, "FIRE", page_options_controls_set_init);
 	menu_page_add_button(page, A_CHANGE_VIEW, "VIEW", page_options_controls_set_init);
 
-	menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
+	if (player == 0) {
+		menu_page_add_toggle(page, save.analog_response - 1, "ANALOG RESPONSE", analog_response, len(analog_response), toggle_analog_response);
+		menu_page_add_toggle(page, settings.swap_gamepads ? 1 : 0, "SWAP GAMEPADS", opts_swap_gamepads, len(opts_swap_gamepads), toggle_swap_gamepads);
+		menu_page_add_button(page, 0, "PLAYER 2 CONTROLS", button_player2_controls);
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -297,10 +371,73 @@ static void toggle_res(menu_t *menu, int data) {
 	save.is_dirty = true;
 }
 
-static void toggle_post(menu_t *menu, int data) {
-	render_set_post_effect(data);
-	save.post_effect = data;
-	save.is_dirty = true;
+// Toggles backed by the settings struct (settings.txt)
+#define SETTINGS_TOGGLE(NAME, FIELD) \
+	static void NAME(menu_t *menu, int data) { \
+		settings.FIELD = data; \
+		settings_set_dirty(); \
+	}
+
+SETTINGS_TOGGLE(toggle_crt, crt)
+SETTINGS_TOGGLE(toggle_bloom, bloom)
+SETTINGS_TOGGLE(toggle_bloom_threshold, bloom_threshold)
+SETTINGS_TOGGLE(toggle_motion_blur, motion_blur)
+SETTINGS_TOGGLE(toggle_tonemap, tonemap)
+SETTINGS_TOGGLE(toggle_lighting, lighting)
+SETTINGS_TOGGLE(toggle_split, split_vertical)
+SETTINGS_TOGGLE(toggle_default_view, external_view)
+SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
+
+static const char *opts_bloom_threshold[] = {"DEFAULT", "LOW", "LOWER", "HIGH"};
+static const char *opts_split[] = {"HORIZONTAL", "VERTICAL"};
+static const char *opts_view[] = {"INTERNAL", "EXTERNAL"};
+static const char *opts_draw_distance[] = {"FULL", "FAR", "MEDIUM", "NEAR"};
+
+// Multiplier options: the strings and their values
+static const char *opts_percent[] = {"25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%"};
+static const float percent_values[] = {0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0};
+
+static int percent_index(float value) {
+	int best = 0;
+	for (int i = 0; i < len(percent_values); i++) {
+		if (fabsf(percent_values[i] - value) < fabsf(percent_values[best] - value)) {
+			best = i;
+		}
+	}
+	return best;
+}
+
+static void toggle_bloom_intensity(menu_t *menu, int data) {
+	settings.bloom_intensity = percent_values[data];
+	settings_set_dirty();
+}
+
+static void toggle_motion_blur_strength(menu_t *menu, int data) {
+	settings.motion_blur_strength = percent_values[data];
+	settings_set_dirty();
+}
+
+static void toggle_lighting_brightness(menu_t *menu, int data) {
+	settings.lighting_brightness = percent_values[data];
+	settings_set_dirty();
+}
+
+static const int point_light_counts[] = {0, 1, 2, 3, 4, 6};
+static const char *opts_point_lights[] = {"OFF", "1", "2", "3", "4", "6"};
+
+static int point_lights_option_index(void) {
+	int index = 0;
+	for (int i = 0; i < len(point_light_counts); i++) {
+		if (point_light_counts[i] <= settings.point_lights) {
+			index = i;
+		}
+	}
+	return index;
+}
+
+static void toggle_point_lights(menu_t *menu, int data) {
+	settings.point_lights = point_light_counts[data];
+	settings_set_dirty();
 }
 
 static void toggle_screen_shake(menu_t *menu, int data) {
@@ -312,9 +449,33 @@ static const char *opts_off_on[] = {"OFF", "ON"};
 static const char *opts_roll[] = {"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"};
 static const char *opts_ui_sizes[] = {"AUTO", "1X", "2X", "3X", "4X"};
 static const char *opts_draw_stats[] = {"OFF", "FPS", "DEBUG"};
-static const char *opts_res[] = {"NATIVE", "240P", "480P"};
-static const char *opts_post[] = {"NONE", "CRT EFFECT"};
+static const char *opts_res[] = {"NATIVE", "240P", "480P", "720P"};
 static const char *opts_screen_shake[] = {"DISABLED", "REDUCED", "FULL"};
+
+static void page_options_effects_init(menu_t *menu) {
+	menu_page_t *page = menu_push(menu, "RENDER EFFECTS", NULL);
+	flags_set(page->layout_flags, MENU_VERTICAL | MENU_FIXED);
+	page->title_pos = vec2i(-160, -100);
+	page->title_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+	page->items_pos = vec2i(-160, -60);
+	page->block_width = 320;
+	page->items_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+
+	menu_page_add_toggle(page, settings.crt, "CRT EFFECT", opts_off_on, len(opts_off_on), toggle_crt);
+	menu_page_add_toggle(page, settings.bloom, "BLOOM", opts_off_on, len(opts_off_on), toggle_bloom);
+	menu_page_add_toggle(page, settings.bloom_threshold, "BLOOM THRESHOLD", opts_bloom_threshold, len(opts_bloom_threshold), toggle_bloom_threshold);
+	menu_page_add_toggle(page, percent_index(settings.bloom_intensity), "BLOOM INTENSITY", opts_percent, len(opts_percent), toggle_bloom_intensity);
+	menu_page_add_toggle(page, settings.motion_blur, "MOTION BLUR", opts_off_on, len(opts_off_on), toggle_motion_blur);
+	menu_page_add_toggle(page, percent_index(settings.motion_blur_strength), "MOTION BLUR STRENGTH", opts_percent, len(opts_percent), toggle_motion_blur_strength);
+	menu_page_add_toggle(page, settings.tonemap, "TONEMAPPING", opts_off_on, len(opts_off_on), toggle_tonemap);
+	menu_page_add_toggle(page, settings.lighting, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_lighting);
+	menu_page_add_toggle(page, percent_index(settings.lighting_brightness), "LIGHTING BRIGHTNESS", opts_percent, len(opts_percent), toggle_lighting_brightness);
+	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_point_lights);
+}
+
+static void button_effects(menu_t *menu, int data) {
+	page_options_effects_init(menu);
+}
 
 static void page_options_video_init(menu_t *menu) {
 	menu_page_t *page = menu_push(menu, "VIDEO OPTIONS", NULL);
@@ -333,7 +494,10 @@ static void page_options_video_init(menu_t *menu) {
 	menu_page_add_toggle(page, save.ui_scale, "UI SCALE", opts_ui_sizes, len(opts_ui_sizes), toggle_ui_scale);
 	menu_page_add_toggle(page, save.draw_stats, "DRAW STATS", opts_draw_stats, len(opts_draw_stats), toggle_draw_stats);
 	menu_page_add_toggle(page, save.screen_res, "SCREEN RESOLUTION", opts_res, len(opts_res), toggle_res);
-	menu_page_add_toggle(page, save.post_effect, "POST PROCESSING", opts_post, len(opts_post), toggle_post);
+	menu_page_add_toggle(page, settings.draw_distance, "DRAW DISTANCE", opts_draw_distance, len(opts_draw_distance), toggle_draw_distance);
+	menu_page_add_toggle(page, settings.external_view, "DEFAULT VIEW", opts_view, len(opts_view), toggle_default_view);
+	menu_page_add_toggle(page, settings.split_vertical, "SPLIT SCREEN", opts_split, len(opts_split), toggle_split);
+	menu_page_add_button(page, 0, "RENDER EFFECTS", button_effects);
 }
 
 // -----------------------------------------------------------------------------
@@ -473,7 +637,39 @@ static void button_race_class_select(menu_t *menu, int data) {
 		return;
 	}
 	g.race_class = data;
-	page_race_type_init(menu);
+	if (g.num_players > 1) {
+		// Two players: always a single race; with or without the AI ships
+		page_opponents_init(menu);
+	}
+	else {
+		page_race_type_init(menu);
+	}
+}
+
+static void button_opponents_select(menu_t *menu, int data) {
+	g.duel = (data == 1);
+	page_team_init(menu);
+}
+
+static void page_opponents_draw(menu_t *menu, int data) {
+	if (data == 0) {
+		draw_model(models.misc.single_race, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time());
+	}
+	else {
+		draw_model(g.ships[0].model, vec2(-0.2, -0.1), vec3(0, 0, -900), system_cycle_time());
+		draw_model(g.ships[2].model, vec2( 0.2, -0.1), vec3(0, 0, -900), system_cycle_time() + 2.0);
+	}
+}
+
+static void page_opponents_init(menu_t *menu) {
+	menu_page_t *page = menu_push(menu, "SELECT OPPONENTS", page_opponents_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	page->items_pos = vec2i(0, -110);
+	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
+	menu_page_add_button(page, 0, "FULL GRID", button_opponents_select);
+	menu_page_add_button(page, 1, "DUEL", button_opponents_select);
 }
 
 static void page_race_class_draw(menu_t *menu, int data) {
@@ -504,7 +700,24 @@ static void page_race_class_init(menu_t *menu) {
 // -----------------------------------------------------------------------------
 // Race Type
 
+// Pseudo race type for the menu; a single race with two players
+#define MENU_RACE_TYPE_TWO_PLAYER NUM_RACE_TYPES
+
+// The team and pilot pages are used for both players. The player is encoded
+// in the button data.
+#define MENU_PLAYER_DATA(PLAYER, VALUE) ((PLAYER) * 100 + (VALUE))
+#define MENU_DATA_PLAYER(DATA) ((DATA) / 100)
+#define MENU_DATA_VALUE(DATA) ((DATA) % 100)
+
+static void page_team_init_for_player(menu_t *menu, int player);
+static void page_pilot_init_for_player(menu_t *menu, int player);
+
 static void button_race_type_select(menu_t *menu, int data) {
+	g.num_players = 1;
+	if (data == MENU_RACE_TYPE_TWO_PLAYER) {
+		g.num_players = 2;
+		data = RACE_TYPE_SINGLE;
+	}
 	g.race_type = data;
 	g.highscore_tab = g.race_type == RACE_TYPE_TIME_TRIAL ? HIGHSCORE_TAB_TIME_TRIAL : HIGHSCORE_TAB_RACE;
 	page_team_init(menu);
@@ -515,6 +728,10 @@ static void page_race_type_draw(menu_t *menu, int data) {
 		case 0: draw_model(models.misc.championship, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
 		case 1: draw_model(models.misc.single_race, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
 		case 2: draw_model(models.options.stopwatch, vec2(0, -0.2), vec3(0, 0, -400), system_cycle_time()); break;
+		case MENU_RACE_TYPE_TWO_PLAYER:
+			draw_model(models.misc.single_race, vec2(-0.25, -0.2), vec3(0, 0, -400), system_cycle_time());
+			draw_model(models.misc.single_race, vec2( 0.25, -0.2), vec3(0, 0, -400), system_cycle_time() + 1.5);
+			break;
 	}
 }
 
@@ -528,6 +745,7 @@ static void page_race_type_init(menu_t *menu) {
 	for (int i = 0; i < len(def.race_types); i++) {
 		menu_page_add_button(page, i, def.race_types[i].name, button_race_type_select);
 	}
+	menu_page_add_button(page, MENU_RACE_TYPE_TWO_PLAYER, "TWO PLAYER RACE", button_race_type_select);
 }
 
 
@@ -536,11 +754,18 @@ static void page_race_type_init(menu_t *menu) {
 // Team
 
 static void button_team_select(menu_t *menu, int data) {
-	g.team = data;
-	page_pilot_init(menu);
+	int player = MENU_DATA_PLAYER(data);
+	if (player == 1) {
+		g.team2 = MENU_DATA_VALUE(data);
+	}
+	else {
+		g.team = MENU_DATA_VALUE(data);
+	}
+	page_pilot_init_for_player(menu, player);
 }
 
 static void page_team_draw(menu_t *menu, int data) {
+	data = MENU_DATA_VALUE(data);
 	int team_model_index = (data + 3) % 4; // models in the prm are shifted by -1
 	draw_model(models.teams[team_model_index], vec2(0, -0.2), vec3(0, 0, -10000), system_cycle_time());
 	draw_model(g.ships[def.teams[data].pilots[0]].model, vec2(0, -0.3), vec3(-700, -800, -1300), system_cycle_time()*1.1);
@@ -548,14 +773,21 @@ static void page_team_draw(menu_t *menu, int data) {
 }
 
 static void page_team_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "SELECT YOUR TEAM", page_team_draw);
+	page_team_init_for_player(menu, 0);
+}
+
+static void page_team_init_for_player(menu_t *menu, int player) {
+	const char *title = g.num_players == 1
+		? "SELECT YOUR TEAM"
+		: (player == 1 ? "PLAYER 2 SELECT TEAM" : "PLAYER 1 SELECT TEAM");
+	menu_page_t *page = menu_push(menu, (char *)title, page_team_draw);
 	flags_add(page->layout_flags, MENU_FIXED);
 	page->title_pos = vec2i(0, 30);
 	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
 	page->items_pos = vec2i(0, -110);
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
 	for (int i = 0; i < len(def.teams); i++) {
-		menu_page_add_button(page, i, def.teams[i].name, button_team_select);
+		menu_page_add_button(page, MENU_PLAYER_DATA(player, i), def.teams[i].name, button_team_select);
 	}
 }
 
@@ -565,8 +797,20 @@ static void page_team_init(menu_t *menu) {
 // Pilot
 
 static void button_pilot_select(menu_t *menu, int data) {
+	int player = MENU_DATA_PLAYER(data);
+	data = MENU_DATA_VALUE(data);
+
+	if (player == 1) {
+		g.pilot2 = data;
+		page_circuit_init(menu);
+		return;
+	}
+
 	g.pilot = data;
-	if (g.race_type != RACE_TYPE_CHAMPIONSHIP) {
+	if (g.num_players > 1) {
+		page_team_init_for_player(menu, 1);
+	}
+	else if (g.race_type != RACE_TYPE_CHAMPIONSHIP) {
 		page_circuit_init(menu);
 	}
 	else {
@@ -577,18 +821,33 @@ static void button_pilot_select(menu_t *menu, int data) {
 }
 
 static void page_pilot_draw(menu_t *menu, int data) {
+	data = MENU_DATA_VALUE(data);
 	draw_model(models.pilots[def.pilots[data].logo_model], vec2(0, -0.2), vec3(0, 0, -10000), system_cycle_time());
 }
 
 static void page_pilot_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "CHOOSE YOUR PILOT", page_pilot_draw);
+	page_pilot_init_for_player(menu, 0);
+}
+
+static void page_pilot_init_for_player(menu_t *menu, int player) {
+	int team = player == 1 ? g.team2 : g.team;
+	const char *title = g.num_players == 1
+		? "CHOOSE YOUR PILOT"
+		: (player == 1 ? "PLAYER 2 CHOOSE PILOT" : "PLAYER 1 CHOOSE PILOT");
+	menu_page_t *page = menu_push(menu, (char *)title, page_pilot_draw);
 	flags_add(page->layout_flags, MENU_FIXED);
 	page->title_pos = vec2i(0, 30);
 	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
 	page->items_pos = vec2i(0, -110);
 	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
-	for (int i = 0; i < len(def.teams[g.team].pilots); i++) {
-		menu_page_add_button(page, def.teams[g.team].pilots[i], def.pilots[def.teams[g.team].pilots[i]].name, button_pilot_select);
+	for (int i = 0; i < len(def.teams[team].pilots); i++) {
+		int pilot = def.teams[team].pilots[i];
+
+		// Every pilot only exists once; player 2 can't have the one of player 1
+		if (player == 1 && pilot == g.pilot) {
+			continue;
+		}
+		menu_page_add_button(page, MENU_PLAYER_DATA(player, pilot), def.pilots[pilot].name, button_pilot_select);
 	}
 }
 
@@ -681,9 +940,34 @@ void main_menu_init(void) {
 
 	menu_reset(main_menu);
 	page_main_init(main_menu);
+
+	// Coming back from a two player race: straight to the two player setup
+	if (g.return_to_two_players) {
+		g.return_to_two_players = false;
+		main_menu->pages[0].index = 1; // the TWO PLAYERS entry
+		button_two_players(main_menu, 0);
+	}
 }
 
 void main_menu_update(void) {
+	// On the "PLAYER 1 ..." / "PLAYER 2 ..." pages only that player's devices
+	// may navigate, so that player 1 can't pick for player 2
+	menu_page_t *page = &main_menu->pages[main_menu->index];
+	// Not on the "PLAYER 2 CONTROLS" options page though: there player 1's
+	// keyboard (arrows, X, backspace...) was filtered out, so without a second
+	// gamepad you could neither pick an entry nor leave the page.
+	int filter = -1;
+	if (!page->title || page->title == controls_player2_title) {
+		filter = -1;
+	}
+	else if (strncmp(page->title, "PLAYER 1", 8) == 0) {
+		filter = 0;
+	}
+	else if (page->title && strncmp(page->title, "PLAYER 2", 8) == 0) {
+		filter = 1;
+	}
+	input_set_player_filter(filter, A_P2_UP, A_P2_CHANGE_VIEW);
+
 	render_set_view_2d();
 	render_push_2d(vec2i(0, 0), render_size(), rgba(128, 128, 128, 255), background);
 

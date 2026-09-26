@@ -11,6 +11,9 @@
 #define SHIP_DIRECTION_FORWARD	(1<< 3)
 #define SHIP_FLYING				(1<< 4)
 #define SHIP_LEFT_SIDE			(1<< 5)
+#define SHIP_EXHAUST_TRAIL_POINTS    12
+#define SHIP_EXHAUST_TRAIL_INTERVAL  (1.0/40.0)
+
 #define SHIP_RACING				(1<< 6)
 #define SHIP_COLL				(1<< 7)
 #define SHIP_ON_JUNCTION		(1<< 8)
@@ -62,6 +65,7 @@
 
 typedef struct ship_t {
 	int16_t pilot;
+	int16_t player; // -1 for AI ships, otherwise the player index
 	int flags;
 
 	section_t *section, *prev_section;
@@ -129,7 +133,14 @@ typedef struct ship_t {
 	struct {
 		vec3_t *v;
 		vec3_t initial;
+		vec3_t base;
+		vec3_t trail[SHIP_EXHAUST_TRAIL_POINTS];
 	} exhaust_plume[3];
+	float exhaust_intensity;
+	float exhaust_len;
+	float turbo_timer; // > 0 while the turbo pickup is kicking
+	float exhaust_trail_timer;
+	bool exhaust_trail_valid;
 
 	// Control Routines
 	vec3_t (*update_strat_func)(struct ship_t *, track_face_t *);
@@ -142,6 +153,8 @@ typedef struct ship_t {
 	sfx_t *sfx_shield;
 } ship_t;
 
+#define ship_is_player(SHIP) ((SHIP)->player >= 0)
+
 void ships_load(void);
 void ships_init(section_t *section);
 void ships_draw(void);
@@ -152,6 +165,12 @@ void ship_init(ship_t *self, section_t *section, int pilot, int position);
 void ship_init_exhaust_plume(ship_t *self);
 void ship_reset_exhaust_plume(ship_t *self);
 void ship_draw(ship_t *self);
+void ship_draw_exhaust_plume(ship_t *self);
+void ship_draw_exhaust_glow(ship_t *self);
+bool ship_exhaust_light(ship_t *self, vec3_t *pos, float *intensity);
+uint16_t ship_exhaust_flare_texture(void);
+uint16_t ship_ring_texture(void);
+void ship_spawn_impact_sparks(ship_t *self, vec3_t pos, vec3_t normal, float strength);
 void ship_draw_shadow(ship_t *self);
 void ship_update(ship_t *self);
 void ship_collide_with_track(ship_t *self, track_face_t *face);

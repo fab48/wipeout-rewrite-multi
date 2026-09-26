@@ -1,3 +1,4 @@
+#include <string.h>
 #include "../mem.h"
 #include "../utils.h"
 #include "../render.h"
@@ -5,8 +6,75 @@
 #include "../platform.h"
 
 #include "track.h"
+#include "ship.h"
 #include "camera.h"
 #include "game.h"
+
+// Builds an "arrow only" variant of the textures used by the boost pads: the
+// blue background is turned black, so that the additive glow pass only lights
+// up the arrow itself.
+static void track_load_glow_textures(const char *base_path) {
+	bool wipeout64_mode = def.circuits[g.circuit].release == GAME_WIPEOUT_64;
+	int len = g.track.textures.len;
+	g.track.glow_textures = mem_bump(sizeof(uint16_t) * len);
+	for (int i = 0; i < len; i++) {
+		g.track.glow_textures[i] = 0xffff;
+	}
+
+	// Which textures do the boost faces use?
+	bool *needed = mem_temp_alloc(sizeof(bool) * len);
+	memset(needed, 0, sizeof(bool) * len);
+	int needed_count = 0;
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		if (flags_is(face->flags, FACE_BOOST) && face->texture < len && !needed[face->texture]) {
+			needed[face->texture] = true;
+			needed_count++;
+		}
+	}
+	if (needed_count == 0) {
+		mem_temp_free(needed);
+		return;
+	}
+
+	// Rebuild those tiles, same as in track_load()
+	ttf_t *ttf = track_load_tile_format(get_path(base_path, "library.ttf"));
+	cmp_t *cmp = image_load_compressed(get_path(base_path, "library.cmp"));
+	int temp_tile_size = wipeout64_mode ? 64 : 128;
+	int sub_tile_size  = wipeout64_mode ? 64 : 32;
+	int tiles          = wipeout64_mode ? 1  : 4;
+	image_t *temp_tile = image_alloc(temp_tile_size, temp_tile_size);
+
+	for (int i = 0; i < len; i++) {
+		if (!needed[i]) {
+			continue;
+		}
+		for (int tx = 0; tx < tiles; tx++) {
+			for (int ty = 0; ty < tiles; ty++) {
+				uint32_t sub_tile_index = wipeout64_mode ? i : ttf->tiles[i].near[ty * tiles + tx];
+				image_t *sub_tile = image_load_from_bytes(cmp->entries[sub_tile_index], false);
+				image_copy(sub_tile, temp_tile, 0, 0, sub_tile_size, sub_tile_size, tx * sub_tile_size, ty * sub_tile_size);
+				mem_temp_free(sub_tile);
+			}
+		}
+
+		// Keep the light, non-blue pixels (the arrow), black out the rest
+		for (uint32_t j = 0; j < temp_tile->width * temp_tile->height; j++) {
+			rgba_t *px = &temp_tile->pixels[j];
+			int brightest = max(px->r, max(px->g, px->b));
+			bool is_arrow = brightest > 140 && (px->r + px->g) > px->b;
+			if (!is_arrow) {
+				px->r = px->g = px->b = 0;
+			}
+		}
+		g.track.glow_textures[i] = render_texture_create(temp_tile->width, temp_tile->height, temp_tile->pixels);
+	}
+
+	mem_temp_free(temp_tile);
+	mem_temp_free(cmp);
+	mem_temp_free(ttf);
+	mem_temp_free(needed);
+}
 
 void track_load(const char *base_path) {
 	// Load and assemble high res track tiles
@@ -47,6 +115,8 @@ void track_load(const char *base_path) {
 	// Wipeout 2097 .tex loading
 	char *tex_path = get_path(base_path, "track.tex");
 	if (file_exists(tex_path)) track_load_texture_file(tex_path);
+
+	track_load_glow_textures(base_path);
 
 	track_load_sections(get_path(base_path, "track.trs"));
 
@@ -205,6 +275,99 @@ void track_load_faces(char *file_name, vec3_t *vertices) {
 	}
 
 	mem_temp_free(bytes);
+	track_compute_smooth_normals();
+}
+
+// Per vertex normals for the lighting: the average of the normals of all faces
+// that share a vertex position, but only of faces that are roughly coplanar.
+// Sharp edges (road to wall) stay sharp, the road surface itself becomes
+// smooth across the polygons.
+#define SMOOTH_NORMALS_HASH_SIZE 16384
+#define SMOOTH_NORMALS_MAX_FACES 8
+#define SMOOTH_NORMALS_MIN_DOT 0.6
+
+typedef struct {
+	vec3_t pos;
+	int count;
+	vec3_t normals[SMOOTH_NORMALS_MAX_FACES];
+} smooth_normal_entry_t;
+
+static uint32_t smooth_normal_hash(vec3_t pos) {
+	int32_t x = (int32_t)pos.x, y = (int32_t)pos.y, z = (int32_t)pos.z;
+	uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u ^ (uint32_t)z * 83492791u;
+	return h & (SMOOTH_NORMALS_HASH_SIZE - 1);
+}
+
+static smooth_normal_entry_t *smooth_normal_find(smooth_normal_entry_t *table, vec3_t pos, bool create) {
+	uint32_t i = smooth_normal_hash(pos);
+	for (int probe = 0; probe < SMOOTH_NORMALS_HASH_SIZE; probe++) {
+		smooth_normal_entry_t *e = &table[i];
+		if (e->count == 0) {
+			if (!create) {
+				return NULL;
+			}
+			e->pos = pos;
+			return e;
+		}
+		if (e->pos.x == pos.x && e->pos.y == pos.y && e->pos.z == pos.z) {
+			return e;
+		}
+		i = (i + 1) & (SMOOTH_NORMALS_HASH_SIZE - 1);
+	}
+	return NULL;
+}
+
+void track_compute_smooth_normals(void) {
+	smooth_normal_entry_t *table = mem_temp_alloc(sizeof(smooth_normal_entry_t) * SMOOTH_NORMALS_HASH_SIZE);
+	memset(table, 0, sizeof(smooth_normal_entry_t) * SMOOTH_NORMALS_HASH_SIZE);
+
+	// Collect the face normals at each vertex position. The two tris of a face
+	// share its normal, so only the first tri adds it.
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		for (int t = 0; t < 2; t++) {
+			for (int v = 0; v < 3; v++) {
+				smooth_normal_entry_t *e = smooth_normal_find(table, face->tris[t].vertices[v].pos, true);
+				if (!e || e->count >= SMOOTH_NORMALS_MAX_FACES) {
+					continue;
+				}
+				bool have = false;
+				if (t == 1) {
+					for (int k = 0; k < e->count; k++) {
+						if (vec3_len(vec3_sub(e->normals[k], face->normal)) < 0.0001) {
+							have = true;
+						}
+					}
+				}
+				if (!have) {
+					e->normals[e->count++] = face->normal;
+				}
+			}
+		}
+	}
+
+	// Average the compatible ones
+	for (int i = 0; i < g.track.face_count; i++) {
+		track_face_t *face = &g.track.faces[i];
+		for (int t = 0; t < 2; t++) {
+			for (int v = 0; v < 3; v++) {
+				vertex_t *vertex = &face->tris[t].vertices[v];
+				vec3_t sum = face->normal;
+				smooth_normal_entry_t *e = smooth_normal_find(table, vertex->pos, false);
+				if (e) {
+					for (int k = 0; k < e->count; k++) {
+						if (vec3_dot(e->normals[k], face->normal) > SMOOTH_NORMALS_MIN_DOT) {
+							sum = vec3_add(sum, e->normals[k]);
+						}
+					}
+				}
+				float len = vec3_len(sum);
+				vertex->normal = len > 0.0001 ? vec3_mulf(sum, 1.0 / len) : face->normal;
+			}
+		}
+	}
+
+	mem_temp_free(table);
 }
 
 void track_load_texture_file(char *tex_path) {
@@ -262,6 +425,18 @@ void track_load_sections(char *file_name) {
 		ts->flags = get_i16(bytes, &p);
 		ts->num = get_i16(bytes, &p);
 		p += 2; // padding
+
+		// Bounding sphere of all faces of this section
+		float radius_sq = 0;
+		for (int f = ts->face_start; f < ts->face_start + ts->face_count && f < g.track.face_count; f++) {
+			for (int t = 0; t < 2; t++) {
+				for (int v = 0; v < 3; v++) {
+					vec3_t d = vec3_sub(g.track.faces[f].tris[t].vertices[v].pos, ts->center);
+					radius_sq = max(radius_sq, vec3_dot(d, d));
+				}
+			}
+		}
+		ts->radius = sqrtf(radius_sq);
 		ts++;
 	}
 
@@ -283,26 +458,98 @@ void track_draw_section(section_t *section) {
 	}
 }
 
-void track_draw(camera_t *camera) {	
+void track_draw(camera_t *camera) {
 	render_set_model_mat(&mat4_identity());
+	render_set_material(RENDER_MATERIAL_TRACK);
 
 	// Calculate the camera forward vector, so we can cull everything that's
 	// behind. Ideally we'd want to do a full frustum culling here. FIXME.
-	vec3_t cam_pos = camera->position;
-	vec3_t cam_dir = camera_forward(camera);
-	
+	camera_view_cone_t cone = camera_view_cone(camera);
 	for(int32_t i = 0; i < g.track.section_count; i++) {
 		section_t *s = &g.track.sections[i];
-		vec3_t diff = vec3_sub(cam_pos, s->center);
-		float cam_dot = vec3_dot(diff, cam_dir);
-		float dist_sq = vec3_dot(diff, diff);
-		if (
-			cam_dot < 2048 && // FIXME: should use the bounding radius of the section
-			dist_sq < (RENDER_FADEOUT_FAR * RENDER_FADEOUT_FAR)
-		) {
+		if (camera_view_cone_has_sphere(&cone, s->center, s->radius)) {
 			track_draw_section(s);
 		}
 	}
+
+	// Boost pads and active pickups glow: draw them a second time, additive,
+	// on top of themselves. That makes them brighter and feeds the bloom.
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-1.0); // just enough to win against the coplanar geometry; a large offset lets the glow show through the road in banked curves
+
+	uint8_t boost_alpha = 110; // keep the arrow readable
+	uint8_t pickup_alpha = 170 + sinf(system_cycle_time() * M_PI * 2.0 * 1.5) * 70;
+	uint16_t halo_texture = ship_exhaust_flare_texture();
+
+	for(int32_t i = 0; i < g.track.section_count; i++) {
+		section_t *s = &g.track.sections[i];
+		if (!camera_view_cone_has_sphere(&cone, s->center, s->radius)) {
+			continue;
+		}
+		track_face_t *face = g.track.faces + s->face_start;
+		for (int32_t j = 0; j < s->face_count; j++, face++) {
+			uint8_t alpha;
+			uint16_t tex_index = texture_from_list(g.track.textures, face->texture);
+			if (flags_is(face->flags, FACE_BOOST)) {
+				alpha = boost_alpha;
+				// Arrow only variant, if we have one: the glow then doesn't
+				// wash out the arrow
+				if (face->texture < g.track.textures.len && g.track.glow_textures[face->texture] != 0xffff) {
+					tex_index = g.track.glow_textures[face->texture];
+					alpha = 255;
+				}
+			}
+			else if (flags_is(face->flags, FACE_PICKUP_ACTIVE)) {
+				alpha = pickup_alpha;
+			}
+			else {
+				continue;
+			}
+			for (int t = 0; t < 2; t++) {
+				tris_t tris = face->tris[t];
+				for (int v = 0; v < 3; v++) {
+					tris.vertices[v].color.a = alpha;
+				}
+				render_push_tris(tris, tex_index);
+			}
+
+			// A soft halo around the pad, slightly above the track, so the 
+			// glow spills over the ground like a real light would
+			vec3_t v0 = face->tris[0].vertices[0].pos;
+			vec3_t v1 = face->tris[0].vertices[1].pos;
+			vec3_t v2 = face->tris[0].vertices[2].pos;
+			vec3_t v3 = face->tris[1].vertices[0].pos;
+			vec3_t center = vec3_mulf(vec3_add(vec3_add(v0, v1), vec3_add(v2, v3)), 0.25);
+			vec3_t lift = vec3_mulf(face->normal, 20);
+			vec3_t c0 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v0, center), 2.2)), lift);
+			vec3_t c1 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v1, center), 2.2)), lift);
+			vec3_t c2 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v2, center), 2.2)), lift);
+			vec3_t c3 = vec3_add(vec3_add(center, vec3_mulf(vec3_sub(v3, center), 2.2)), lift);
+			rgba_t halo = face->tris[0].vertices[0].color;
+			halo.a = alpha * 0.6;
+			render_push_tris((tris_t){
+				.vertices = {
+					{.pos = c0, .uv = {0, 0}, .color = halo},
+					{.pos = c1, .uv = {128, 0}, .color = halo},
+					{.pos = c2, .uv = {128, 128}, .color = halo},
+				}
+			}, halo_texture);
+			render_push_tris((tris_t){
+				.vertices = {
+					{.pos = c3, .uv = {0, 128}, .color = halo},
+					{.pos = c0, .uv = {0, 0}, .color = halo},
+					{.pos = c2, .uv = {128, 128}, .color = halo},
+				}
+			}, halo_texture);
+		}
+	}
+
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
+	render_set_material(RENDER_MATERIAL_TRACK);
 }
 
 void track_cycle_pickups(void) {

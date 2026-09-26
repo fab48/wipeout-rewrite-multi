@@ -106,7 +106,37 @@ void render_set_screen_size(vec2i_t size) {
 }
 
 void render_set_resolution(render_resolution_t res) {}
+void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness) {
+	(void) bloom_intensity;
+	(void) motion_blur_strength;
+	(void) lighting_brightness;
+}
+render_post_effect_t render_get_post_effect(void) {
+	return RENDER_POST_NONE;
+}
 void render_set_post_effect(render_post_effect_t post) {}
+void render_scene_post(float motion_blur) {}
+// FIXME: split screen is not supported by the software renderer
+void render_set_viewport(vec2i_t pos, vec2i_t size) {}
+void render_reset_viewport(void) {}
+static float draw_distance_factor = 1.0;
+void render_set_draw_distance(float factor) {
+	draw_distance_factor = factor;
+}
+float render_draw_distance(void) {
+	return RENDER_FADEOUT_FAR * draw_distance_factor;
+}
+void render_env_begin(int face) {
+	(void) face;
+}
+void render_env_end(void) {}
+void render_env_finish(void) {}
+void render_env_clear(void) {}
+void render_set_lights(render_light_t *lights, int len) {
+	(void) lights;
+	(void) len;
+}
+void render_set_material(render_material_t material) {}
 
 vec2i_t render_size(void) {
 	return screen_size;

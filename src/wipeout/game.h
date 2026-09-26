@@ -2,6 +2,7 @@
 #define GAME_H
 
 #include "../types.h"
+#include "../render.h"
 
 #include "droid.h"
 #include "ship.h"
@@ -45,7 +46,29 @@ typedef enum {
 	A_MENU_SELECT,
 	A_MENU_START,
 	A_MENU_QUIT,
+
+	// Player 2; must be in the same order as the player 1 actions above
+	A_P2_UP,
+	A_P2_DOWN,
+	A_P2_LEFT,
+	A_P2_RIGHT,
+	A_P2_BRAKE_LEFT,
+	A_P2_BRAKE_RIGHT,
+	A_P2_THRUST,
+	A_P2_FIRE,
+	A_P2_CHANGE_VIEW,
+
+	A_TOGGLE_FX, // debug: all render effects on/off (F3)
 } action_t;
+
+#define MAX_PLAYERS 2
+
+// Everything on: bloom (LOWER threshold), motion blur, PBR lighting,
+// tonemapping, 4 point lights. No CRT filter.
+#define GAME_DEFAULT_POST_EFFECT ( \
+	RENDER_POST_BLOOM | RENDER_POST_MOTION_BLUR | RENDER_POST_LIGHTING | \
+	(4 << RENDER_POST_POINT_LIGHTS_SHIFT) | (2 << RENDER_POST_BLOOM_THRESHOLD_SHIFT) \
+)
 
 
 typedef enum {
@@ -232,6 +255,15 @@ typedef struct {
 	int team;
 	int pilot;
 	int circuit;
+
+	// Split screen; pilot/team above are for player 1
+	int num_players;
+	bool duel; // two players only, no AI ships
+	bool return_to_two_players; // main menu opens on the two player setup
+	int team2;
+	int pilot2;
+	int view_player; // the player whose view is currently being drawn
+	int finish_rank[MAX_PLAYERS]; // race position when crossing the finish line
 	bool is_attract_mode;
 	bool show_credits;
 
@@ -246,8 +278,10 @@ typedef struct {
 	pilot_points_t race_ranks[NUM_PILOTS];
 	pilot_points_t championship_ranks[NUM_PILOTS];
 
-	camera_t camera;
-	droid_t droid;
+	// camera points to the camera of the view that is currently updated/drawn
+	camera_t cameras[MAX_PLAYERS];
+	camera_t *camera;
+	droid_t droids[MAX_PLAYERS];
 	ship_t ships[NUM_PILOTS];
 	track_t track;
 
@@ -298,7 +332,34 @@ typedef struct {
 
 extern const game_def_t def;
 extern game_t g;
+
+static inline camera_t *game_ship_camera(ship_t *ship) {
+	return &g.cameras[ship->player > 0 ? ship->player : 0];
+}
+
+static inline ship_t *game_player_ship(int player) {
+	return &g.ships[player == 1 ? g.pilot2 : g.pilot];
+}
+
+// In a duel only the two players' ships take part
+static inline bool game_ship_is_active(ship_t *ship) {
+	return !g.duel || ship->player >= 0;
+}
 extern save_t save;
+
+// Player 2 controls; stored in a separate file, so that the save_t layout
+// (and with it the highscores) stays untouched
+#define SAVE2_DATA_MAGIC 0x32736f77
+
+typedef struct {
+	uint32_t magic;
+	bool is_dirty;
+	uint8_t buttons[NUM_GAME_ACTIONS][2];
+} save2_t;
+
+extern save2_t save2;
+
+void game_bind_player2_controls(void);
 
 void game_init(void);
 void game_set_scene(game_scene_t scene);

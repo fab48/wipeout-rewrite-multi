@@ -7,6 +7,7 @@
 #include "weapon.h"
 #include "object.h"
 #include "game.h"
+#include "race.h"
 #include "image.h"
 #include "particle.h"
 #include "camera.h"
@@ -103,8 +104,78 @@ void weapons_load(void) {
 	weapons_init();
 }
 
+// Explosion effects: a bright flash that swells and fades, and an expanding
+// shockwave ring. Drawn additively in weapons_draw().
+#define EXPLOSIONS_MAX 8
+#define EXPLOSION_DURATION 0.55
+
+typedef struct {
+	vec3_t pos;
+	float timer;
+	rgba_t color;
+} explosion_fx_t;
+
+static explosion_fx_t explosions[EXPLOSIONS_MAX];
+
+static void explosion_add(vec3_t pos, int particle_type) {
+	rgba_t color;
+	switch (particle_type) {
+	case PARTICLE_TYPE_FIRE: color = rgba(128, 80, 30, 255); break;
+	case PARTICLE_TYPE_FIRE_WHITE: color = rgba(128, 118, 100, 255); break;
+	case PARTICLE_TYPE_EBOLT:
+	case PARTICLE_TYPE_GREENY: color = rgba(60, 128, 70, 255); break;
+	default: color = rgba(128, 128, 128, 255); break;
+	}
+	int slot = 0;
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		if (explosions[i].timer < explosions[slot].timer) {
+			slot = i;
+		}
+	}
+	explosions[slot] = (explosion_fx_t){.pos = pos, .timer = EXPLOSION_DURATION, .color = color};
+}
+
+static void explosions_update(void) {
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		if (explosions[i].timer > 0) {
+			explosions[i].timer -= system_tick();
+		}
+	}
+}
+
+static void explosions_draw(void) {
+	uint16_t flare = ship_exhaust_flare_texture();
+	uint16_t ring = ship_ring_texture();
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		explosion_fx_t *e = &explosions[i];
+		if (e->timer <= 0) {
+			continue;
+		}
+		float t = 1.0 - e->timer / EXPLOSION_DURATION; // 0 -> 1
+
+		// Flash: big right away, fading out fast
+		float flash_fade = (1.0 - t) * (1.0 - t);
+		int flash_size = 500 + 700 * t;
+		rgba_t flash = e->color;
+		flash.a = 255 * flash_fade;
+		render_push_sprite(e->pos, vec2i(flash_size, flash_size), flash, flare);
+		rgba_t core = rgba(128, 128, 128, 200 * flash_fade);
+		render_push_sprite(e->pos, vec2i(flash_size * 0.4, flash_size * 0.4), core, flare);
+
+		// Shockwave: grows fast, thins out
+		float ring_t = sqrtf(t);
+		int ring_size = 300 + 2400 * ring_t;
+		rgba_t ring_color = e->color;
+		ring_color.a = 220 * (1.0 - t);
+		render_push_sprite(e->pos, vec2i(ring_size, ring_size), ring_color, ring);
+	}
+}
+
 void weapons_init(void) {
 	weapons_active = 0;
+	for (int i = 0; i < EXPLOSIONS_MAX; i++) {
+		explosions[i].timer = 0;
+	}
 }
 
 weapon_t *weapon_init(ship_t *ship) {
@@ -158,6 +229,7 @@ void weapons_fire_delayed(ship_t *ship, int weapon_type) {
 bool weapon_collides_with_track(weapon_t *self);
 
 void weapons_update(void) {
+	explosions_update();
 	for (int i = 0; i < weapons_active; i++) {
 		weapon_t *weapon = &weapons[i];
 		
@@ -198,6 +270,14 @@ void weapons_update(void) {
 					vec3_t velocity = vec3_rand(512);
 					particles_spawn(weapon->position, weapon->track_hit_particle, velocity, 256);
 				}
+				// The weapon may already have passed through the wall a bit; put
+				// the light back in front of it, or the wall would be on the
+				// unlit side
+				vec3_t back = vec3_len(weapon->velocity) > 0.001
+					? vec3_mulf(vec3_normalize(weapon->velocity), -600)
+					: vec3(0, 0, 0);
+				race_add_flash_light(vec3_add(weapon->position, back), weapon->track_hit_particle);
+				explosion_add(vec3_add(weapon->position, back), weapon->track_hit_particle);
 				sfx_play_at(SFX_EXPLOSION_2, weapon->position, vec3(0,0,0), 1);
 				weapon->active = false;
 			}
@@ -207,6 +287,57 @@ void weapons_update(void) {
 		if (!weapon->active) {
 			weapons[i--] = weapons[--weapons_active];
 			continue;
+		}
+	}
+}
+
+static rgba_t weapon_shield_vertex_color(weapon_t *self, mat4_t *mat, vec3_t vertex) {
+	// Fresnel like rim: bright where the bubble's surface is seen at a grazing
+	// angle, nearly invisible where we look straight through it
+	vec3_t world = vec3_transform(vertex, mat);
+	vec3_t normal = vec3_sub(world, self->position);
+	vec3_t view = vec3_sub(g.camera->position, world);
+	float len = vec3_len(normal) * vec3_len(view);
+	float facing = len > 0.001 ? fabsf(vec3_dot(normal, view) / len) : 1.0;
+	float rim = 1.0 - clamp(facing, 0.0, 1.0);
+	rim = rim * rim;
+
+	// Energy waves, running over the bubble from front to back
+	float wave = sinf(self->timer * 9.0 + vertex.z * 0.012 + vertex.y * 0.02) * 0.5 + 0.5;
+	wave = wave * wave;
+
+	// Flicker when the shield is about to run out
+	float flicker = self->timer < 1.0 ? (sinf(self->timer * 40.0) * 0.5 + 0.5) : 1.0;
+
+	float alpha = (14.0 + rim * 170.0 + wave * (20.0 + rim * 60.0)) * flicker;
+	return rgba(
+		24 + wave * 72,
+		72 + wave * 56,
+		220,
+		clamp(alpha, 0.0, 255.0)
+	);
+}
+
+static void weapon_shield_set_colors(weapon_t *self, mat4_t *mat) {
+	Prm poly = {.primitive = self->model->primitives};
+	int primitives_len = self->model->primitives_len;
+	vec3_t *vertices = self->model->vertices;
+
+	for (int k = 0; k < primitives_len; k++) {
+		switch (poly.primitive->type) {
+		case PRM_TYPE_G3:
+			for (int v = 0; v < 3; v++) {
+				poly.g3->color[v] = weapon_shield_vertex_color(self, mat, vertices[poly.g3->coords[v]]);
+			}
+			poly.g3 += 1;
+			break;
+
+		case PRM_TYPE_G4:
+			for (int v = 0; v < 4; v++) {
+				poly.g4->color[v] = weapon_shield_vertex_color(self, mat, vertices[poly.g4->coords[v]]);
+			}
+			poly.g4 += 1;
+			break;
 		}
 	}
 }
@@ -221,9 +352,67 @@ void weapons_draw(void) {
 			if (weapon->model == weapon_assets.mine) {
 				weapon_update_mine_lights(weapon, i);
 			}
+
+			if (weapon->update_func == weapon_update_shield) {
+				// The internal view shield is only for the player that sits in it
+				bool internal = (
+					weapon->owner->player == g.view_player &&
+					flags_is(weapon->owner->flags, SHIP_VIEW_INTERNAL)
+				);
+				weapon->model = internal ? weapon_assets.shield_internal : weapon_assets.shield;
+				weapon->position = internal ? ship_cockpit(weapon->owner) : weapon->owner->position;
+				mat4_set_translation(&mat, weapon->position);
+
+				// Energy bubble: additive, double sided and without writing to the
+				// depth buffer, so that it never hides anything
+				weapon_shield_set_colors(weapon, &mat);
+				render_set_blend_mode(RENDER_BLEND_LIGHTER);
+				render_set_depth_write(false);
+				render_set_cull_backface(false);
+				object_draw(weapon->model, &mat);
+				render_set_cull_backface(true);
+				render_set_depth_write(true);
+				render_set_blend_mode(RENDER_BLEND_NORMAL);
+				continue;
+			}
 			object_draw(weapon->model, &mat);
 		}
 	}
+
+	// Flares on the projectiles: an orange exhaust on rockets and missiles, a
+	// crackling blue-white core on the e-bolt
+	render_set_model_mat(&mat4_identity());
+	render_set_material(RENDER_MATERIAL_UNLIT);
+	render_set_blend_mode(RENDER_BLEND_LIGHTER);
+	render_set_depth_write(false);
+	render_set_depth_offset(-32.0);
+	uint16_t flare = ship_exhaust_flare_texture();
+
+	for (int i = 0; i < weapons_active; i++) {
+		weapon_t *weapon = &weapons[i];
+		if (!weapon->model) {
+			continue;
+		}
+		if (weapon->model == weapon_assets.rocket || weapon->model == weapon_assets.missile) {
+			float speed = vec3_len(weapon->velocity);
+			vec3_t back = speed > 0.001 ? vec3_mulf(weapon->velocity, -110.0 / speed) : vec3(0, 0, 0);
+			vec3_t tail = vec3_add(weapon->position, back);
+			int size = 200 * rand_float(0.85, 1.15);
+			render_push_sprite(tail, vec2i(size, size), rgba(128, 60, 16, 255), flare);
+			render_push_sprite(tail, vec2i(size * 0.45, size * 0.45), rgba(128, 110, 70, 255), flare);
+		}
+		else if (weapon->model == weapon_assets.ebolt) {
+			int size = 260 * rand_float(0.7, 1.3);
+			render_push_sprite(weapon->position, vec2i(size, size), rgba(40, 90, 128, 255), flare);
+			render_push_sprite(weapon->position, vec2i(size * 0.4, size * 0.4), rgba(110, 128, 128, 255), flare);
+		}
+	}
+
+	explosions_draw();
+
+	render_set_depth_offset(0.0);
+	render_set_depth_write(true);
+	render_set_blend_mode(RENDER_BLEND_NORMAL);
 }
 
 
@@ -277,6 +466,8 @@ ship_t *weapon_collides_with_ship(weapon_t *self) {
 				vec3_t velocity = vec3_add(base_vel, vec3_rand(512));
 				particles_spawn(self->position, self->ship_hit_particle, velocity, 256);
 			}
+			race_add_flash_light(self->position, self->ship_hit_particle);
+			explosion_add(self->position, self->ship_hit_particle);
 			return ship;
 		}
 	}
@@ -338,7 +529,7 @@ void weapon_update_mine_wait_for_release(weapon_t *self) {
 		self->track_hit_particle = PARTICLE_TYPE_NONE;
 		self->ship_hit_particle = PARTICLE_TYPE_FIRE;
 
-		if (self->owner->pilot == g.pilot) {
+		if (ship_is_player(self->owner)) {
 			sfx_play(SFX_MINE_DROP);
 		}
 	}
@@ -374,9 +565,9 @@ void weapon_update_mine(weapon_t *self) {
 		sfx_play_at(SFX_EXPLOSION_1, self->position, vec3(0,0,0), 1);
 		self->active = false;
 		if (flags_not(ship->flags, SHIP_SHIELDED)) {
-			if (ship->pilot == g.pilot) {
+			if (ship_is_player(ship)) {
 				ship->velocity = vec3_sub(ship->velocity, vec3_mulf(ship->velocity, 0.125));
-				camera_set_shake(&g.camera, CAMERA_SHAKE_LONG);
+				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.125;
@@ -402,7 +593,7 @@ void weapon_fire_missile(ship_t *ship) {
 	self->drag = 0.25;
 	weapon_set_trajectory(self);
 
-	if (self->owner->pilot == g.pilot) {
+	if (ship_is_player(self->owner)) {
 		sfx_play(SFX_MISSILE_FIRE);
 	}
 }
@@ -422,11 +613,11 @@ void weapon_update_missile(weapon_t *self) {
 		self->active = false;
 
 		if (flags_not(ship->flags, SHIP_SHIELDED)) {
-			if (ship->pilot == g.pilot) {
+			if (ship_is_player(ship)) {
 				ship->velocity = vec3_sub(ship->velocity, vec3_mulf(ship->velocity, 0.75));
 				ship->angular_velocity.z += rand_float(-0.1, 0.1);
 				ship->turn_rate_from_hit = rand_float(-0.1, 0.1);
-				camera_set_shake(&g.camera, CAMERA_SHAKE_LONG);
+				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.03125;
@@ -452,7 +643,7 @@ void weapon_fire_rocket(ship_t *ship) {
 	self->drag = 0.03125;
 	weapon_set_trajectory(self);
 
-	if (self->owner->pilot == g.pilot) {
+	if (ship_is_player(self->owner)) {
 		sfx_play(SFX_MISSILE_FIRE);
 	}
 }
@@ -470,11 +661,11 @@ void weapon_update_rocket(weapon_t *self) {
 		self->active = false;
 
 		if (flags_not(ship->flags, SHIP_SHIELDED)) {
-			if (ship->pilot == g.pilot) {
+			if (ship_is_player(ship)) {
 				ship->velocity = vec3_mulf(ship->velocity, 0.25);
 				ship->angular_velocity.z += rand_float(-0.1, 0.1);;
 				ship->turn_rate_from_hit = rand_float(-0.1, 0.1);;
-				camera_set_shake(&g.camera, CAMERA_SHAKE_LONG);
+				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.03125;
@@ -502,7 +693,7 @@ void weapon_fire_ebolt(ship_t *ship) {
 	self->drag = 0.25;
 	weapon_set_trajectory(self);
 
-	if (self->owner->pilot == g.pilot) {
+	if (ship_is_player(self->owner)) {
 		sfx_play(SFX_EBOLT);
 	}
 }
@@ -559,42 +750,22 @@ void weapon_update_shield(weapon_t *self) {
 	}
 	self->angle = self->owner->angle;
 
-	// Animated colors.
-	Prm poly = {.primitive = self->model->primitives};
-	int primitives_len = self->model->primitives_len;
-	uint8_t col;
-	int16_t *coords;
-	const uint8_t shield_alpha = 48;
-
-	float color_timer = self->timer * 0.05;
-	for (int k = 0; k < primitives_len; k++) {
-		switch (poly.primitive->type) {
-		case PRM_TYPE_G3 :
-			coords = poly.g3->coords;
-			for (int v = 0; v < 3; v++) {
-				col = sinf(color_timer * coords[v]) * 127 + 128;
-				poly.g3->color[v] = rgba(col, col, 255, shield_alpha);
-			}
-			poly.g3 += 1;
-			break;
-
-		case PRM_TYPE_G4 :
-			coords = poly.g4->coords;
-			for (int v = 0; v < 4; v++) {
-				col = sinf(color_timer * coords[v]) * 127 + 128;
-				poly.g4->color[v] = rgba(col, col, 255, shield_alpha);
-			}
-			poly.g4 += 1;
-			break;
-		}
-	}
+	// The colors are set in weapons_draw(), as they depend on the camera
 }
 
 
 void weapon_fire_turbo(ship_t *ship) {
 	ship->velocity = vec3_add(ship->velocity, vec3_mulf(ship->mat.basis.forward.vec3, 39321)); // unitVecNose.vx) << 3) * FR60) / 50
+	ship->turbo_timer = 1.4;
+
+	// A blue-white flash from the engines
+	vec3_t pos;
+	float intensity;
+	if (ship_exhaust_light(ship, &pos, &intensity)) {
+		race_add_flash_light(pos, PARTICLE_TYPE_EBOLT);
+	}
 	
-	if (ship->pilot == g.pilot) {
+	if (ship_is_player(ship)) {
 		sfx_t *sfx = sfx_play(SFX_MISSILE_FIRE);
 		sfx->pitch = 0.25;
 	}

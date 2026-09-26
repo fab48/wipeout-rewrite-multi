@@ -120,6 +120,7 @@ COMMON_SRC = \
 	src/wipeout/weapon.c \
 	src/wipeout/particle.c \
 	src/wipeout/sfx.c \
+	src/wipeout/settings.c \
 	src/utils.c \
 	src/types.c \
 	src/system.c \

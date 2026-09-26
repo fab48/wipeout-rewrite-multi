@@ -52,6 +52,8 @@ typedef struct section_t {
 
 	int16_t flags;
 	int16_t num;
+
+	float radius; // bounding sphere around center, for culling
 } section_t;
 
 #define SECTION_JUMP            1
@@ -71,6 +73,7 @@ typedef struct track_t {
 	int32_t pickups_len;
 	int32_t total_section_nums;
 	texture_list_t textures;
+	uint16_t *glow_textures; // per track texture: arrow-only variant for the boost pads, or 0xffff
 	
 	track_face_t *faces;
 	section_t *sections;
@@ -79,6 +82,7 @@ typedef struct track_t {
 
 
 void track_load(const char *base_path);
+void track_compute_smooth_normals(void);
 ttf_t *track_load_tile_format(char *ttf_name);
 vec3_t *track_load_vertices(char *file);
 void track_load_faces(char *file, vec3_t *vertices);

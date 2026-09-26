@@ -3,7 +3,7 @@
 #include "input.h"
 #include "utils.h"
 
-static const char *button_names[] = {
+static const char *button_names[INPUT_BUTTON_MAX] = {
 	NULL,
 	NULL,
 	NULL,
@@ -138,6 +138,33 @@ static const char *button_names[] = {
 	[INPUT_GAMEPAD_R_STICK_DOWN] = "RSTKDOWN",
 	[INPUT_GAMEPAD_R_STICK_LEFT] = "RSTKLEFT",
 	[INPUT_GAMEPAD_R_STICK_RIGHT] = "RSTKRIGHT",
+
+	// Second gamepad
+	[INPUT_GAMEPAD2_A] = "2A",
+	[INPUT_GAMEPAD2_Y] = "2Y",
+	[INPUT_GAMEPAD2_B] = "2B",
+	[INPUT_GAMEPAD2_X] = "2X",
+	[INPUT_GAMEPAD2_L_SHOULDER] = "2LSHLDR",
+	[INPUT_GAMEPAD2_R_SHOULDER] = "2RSHLDR",
+	[INPUT_GAMEPAD2_L_TRIGGER] = "2LTRIG",
+	[INPUT_GAMEPAD2_R_TRIGGER] = "2RTRIG",
+	[INPUT_GAMEPAD2_SELECT] = "2SELECT",
+	[INPUT_GAMEPAD2_START] = "2START",
+	[INPUT_GAMEPAD2_L_STICK_PRESS] = "2LSTK",
+	[INPUT_GAMEPAD2_R_STICK_PRESS] = "2RSTK",
+	[INPUT_GAMEPAD2_DPAD_UP] = "2DPUP",
+	[INPUT_GAMEPAD2_DPAD_DOWN] = "2DPDOWN",
+	[INPUT_GAMEPAD2_DPAD_LEFT] = "2DPLEFT",
+	[INPUT_GAMEPAD2_DPAD_RIGHT] = "2DPRIGHT",
+	[INPUT_GAMEPAD2_HOME] = "2HOME",
+	[INPUT_GAMEPAD2_L_STICK_UP] = "2LSTKUP",
+	[INPUT_GAMEPAD2_L_STICK_DOWN] = "2LSTKDOWN",
+	[INPUT_GAMEPAD2_L_STICK_LEFT] = "2LSTKLEFT",
+	[INPUT_GAMEPAD2_L_STICK_RIGHT] = "2LSTKRIGHT",
+	[INPUT_GAMEPAD2_R_STICK_UP] = "2RSTKUP",
+	[INPUT_GAMEPAD2_R_STICK_DOWN] = "2RSTKDOWN",
+	[INPUT_GAMEPAD2_R_STICK_LEFT] = "2RSTKLEFT",
+	[INPUT_GAMEPAD2_R_STICK_RIGHT] = "2RSTKRIGHT",
 	NULL,
 	[INPUT_MOUSE_LEFT] = "MLEFT",
 	[INPUT_MOUSE_MIDDLE] = "MMIDDLE",
@@ -197,8 +224,56 @@ void input_set_layer_button_state(input_layer_t layer, button_t button, float st
 	}
 }
 
+static bool gamepad_swap = false;
+static int player_filter = -1;
+static uint8_t player2_action_min = 0, player2_action_max = 0;
+
+void input_set_gamepad_swap(bool swap) {
+	gamepad_swap = swap;
+}
+
+void input_set_player_filter(int player, uint8_t p2_action_min, uint8_t p2_action_max) {
+	if (player != player_filter) {
+		// Don't leave anything stuck when we start ignoring a device
+		input_clear();
+	}
+	player_filter = player;
+	player2_action_min = p2_action_min;
+	player2_action_max = p2_action_max;
+}
+
+static bool input_button_belongs_to_player2(button_t button) {
+	if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
+		return true;
+	}
+	if (button < INPUT_KEY_MAX) {
+		uint8_t action = bindings[INPUT_LAYER_USER][button];
+		return action >= player2_action_min && action <= player2_action_max;
+	}
+	return false;
+}
+
 void input_set_button_state(button_t button, float state) {
 	error_if(button < 0 || button >= INPUT_BUTTON_MAX, "Invalid input button %d", button);
+
+	// Gamepad 1 <-> gamepad 2
+	if (gamepad_swap) {
+		if (button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT) {
+			button += INPUT_GAMEPAD2_OFFSET;
+		}
+		else if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
+			button -= INPUT_GAMEPAD2_OFFSET;
+		}
+	}
+
+	// Menus for one player only (team/pilot selection in split screen)
+	if (player_filter >= 0 && !capture_callback) {
+		bool is_player2 = input_button_belongs_to_player2(button);
+		bool is_mouse = button >= INPUT_MOUSE_LEFT;
+		if (!is_mouse && is_player2 != (player_filter == 1)) {
+			return;
+		}
+	}
 
 	input_set_layer_button_state(INPUT_LAYER_SYSTEM, button, state);
 	input_set_layer_button_state(INPUT_LAYER_USER, button, state);
