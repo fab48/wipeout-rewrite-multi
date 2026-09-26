@@ -953,8 +953,14 @@ void main_menu_update(void) {
 	// On the "PLAYER 1 ..." / "PLAYER 2 ..." pages only that player's devices
 	// may navigate, so that player 1 can't pick for player 2
 	menu_page_t *page = &main_menu->pages[main_menu->index];
+	// Not on the "PLAYER 2 CONTROLS" options page though: there player 1's
+	// keyboard (arrows, X, backspace...) was filtered out, so without a second
+	// gamepad you could neither pick an entry nor leave the page.
 	int filter = -1;
-	if (page->title && strncmp(page->title, "PLAYER 1", 8) == 0) {
+	if (!page->title || page->title == controls_player2_title) {
+		filter = -1;
+	}
+	else if (strncmp(page->title, "PLAYER 1", 8) == 0) {
 		filter = 0;
 	}
 	else if (page->title && strncmp(page->title, "PLAYER 2", 8) == 0) {

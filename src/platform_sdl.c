@@ -75,9 +75,72 @@ static int platform_gamepad_slot(SDL_JoystickID instance_id) {
 	return -1;
 }
 
+// Generic USB pads (DragonRise "PC Twin Shock", Freebox pad, PS2 adapters...)
+// are plain joysticks that SDL doesn't know as game controllers, so they were
+// ignored. Give them a mapping built from their button/axis/hat counts, using
+// the usual DragonRise layout (1=triangle 2=circle 3=cross 4=square, L1 R1 L2
+// R2, select, start, L3, R3). Buttons can still be rebound in the menu.
+static void platform_gamepad_add_generic_mapping(int device_index) {
+	SDL_Joystick *joy = SDL_JoystickOpen(device_index);
+	if (!joy) {
+		return;
+	}
+	int num_buttons = SDL_JoystickNumButtons(joy);
+	int num_axes = SDL_JoystickNumAxes(joy);
+	int num_hats = SDL_JoystickNumHats(joy);
+
+	char guid[64];
+	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(joy), guid, sizeof(guid));
+
+	// The name must not contain commas
+	char name[64];
+	const char *joy_name = SDL_JoystickName(joy);
+	snprintf(name, sizeof(name), "%s", joy_name ? joy_name : "Generic Joystick");
+	for (char *c = name; *c; c++) {
+		if (*c == ',') {
+			*c = ' ';
+		}
+	}
+	SDL_JoystickClose(joy);
+
+	static const char *button_names[] = {
+		"y", "b", "a", "x", "leftshoulder", "rightshoulder",
+		"lefttrigger", "righttrigger", "back", "start", "leftstick", "rightstick"
+	};
+
+	char mapping[1024];
+	int len = snprintf(mapping, sizeof(mapping), "%s,%s,", guid, name);
+	for (int i = 0; i < num_buttons && i < (int)(sizeof(button_names)/sizeof(button_names[0])); i++) {
+		len += snprintf(mapping + len, sizeof(mapping) - len, "%s:b%d,", button_names[i], i);
+	}
+	if (num_axes >= 2) {
+		len += snprintf(mapping + len, sizeof(mapping) - len, "leftx:a0,lefty:a1,");
+	}
+	if (num_axes >= 5) {
+		len += snprintf(mapping + len, sizeof(mapping) - len, "rightx:a3,righty:a4,");
+	}
+	else if (num_axes >= 4) {
+		len += snprintf(mapping + len, sizeof(mapping) - len, "rightx:a2,righty:a3,");
+	}
+	if (num_hats >= 1) {
+		len += snprintf(mapping + len, sizeof(mapping) - len, "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,");
+	}
+
+	if (SDL_GameControllerAddMapping(mapping) >= 0) {
+		printf("Gamepad: generic mapping for \"%s\" (%d buttons, %d axes, %d hats)\n%s\n",
+			name, num_buttons, num_axes, num_hats, mapping);
+	}
+	else {
+		printf("Gamepad: failed to map \"%s\": %s\n", name, SDL_GetError());
+	}
+}
+
 static void platform_gamepad_add(int device_index) {
 	if (!SDL_IsGameController(device_index)) {
-		return;
+		platform_gamepad_add_generic_mapping(device_index);
+		if (!SDL_IsGameController(device_index)) {
+			return;
+		}
 	}
 	// Already open? SDL reports all present devices as "added" on startup
 	if (platform_gamepad_slot(SDL_JoystickGetDeviceInstanceID(device_index)) != -1) {
@@ -145,6 +208,10 @@ void platform_pump_events(void) {
 		// Gamepads connect/disconnect
 		else if (ev.type == SDL_CONTROLLERDEVICEADDED) {
 			platform_gamepad_add(ev.cdevice.which);
+		}
+		// Plain joysticks only send this one; platform_gamepad_add() maps them
+		else if (ev.type == SDL_JOYDEVICEADDED) {
+			platform_gamepad_add(ev.jdevice.which);
 		}
 		else if (ev.type == SDL_CONTROLLERDEVICEREMOVED) {
 			platform_gamepad_remove(ev.cdevice.which);
