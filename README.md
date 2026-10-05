@@ -1,6 +1,7 @@
 modified with ClaudeCode : add for VFXs and 2players
 
-source to game files : https://archive.org/details/wipeout-pc-redump
+source to game files : [https://archive.org/details/wipeout-pc-redump](https://phoboslab.org/log/2023/08/rewriting-wipeout
+)
 
 
 # wipEout Rewrite
