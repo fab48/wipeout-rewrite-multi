@@ -43,6 +43,9 @@ void render_set_lights(render_light_t *lights, int len) {
 void render_set_material(render_material_t material) {
 	(void) material;
 }
+void render_set_texture_upscale(bool xbr) {
+	(void) xbr;
+}
 void render_set_texture_smooth(bool smooth) {
 	(void) smooth;
 }

@@ -395,6 +395,7 @@ SETTINGS_TOGGLE(toggle_split, split_vertical)
 SETTINGS_TOGGLE(toggle_default_view, external_view)
 SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
 SETTINGS_TOGGLE(toggle_texture_smooth, texture_smooth)
+SETTINGS_TOGGLE(toggle_texture_upscale, texture_upscale)
 
 static const char *opts_texture_filter[] = {"SHARP", "SMOOTH"};
 
@@ -482,6 +483,7 @@ static void page_options_effects_init(menu_t *menu) {
 	menu_page_add_toggle(page, percent_index(settings.lighting_brightness), "LIGHTING BRIGHTNESS", opts_percent, len(opts_percent), toggle_lighting_brightness);
 	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_point_lights);
 	menu_page_add_toggle(page, settings.texture_smooth, "TEXTURE FILTER", opts_texture_filter, len(opts_texture_filter), toggle_texture_smooth);
+	menu_page_add_toggle(page, settings.texture_upscale, "XBR UPSCALE (RESTART)", opts_off_on, len(opts_off_on), toggle_texture_upscale);
 }
 
 static void button_effects(menu_t *menu, int data) {

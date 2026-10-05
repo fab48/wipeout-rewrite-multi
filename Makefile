@@ -121,6 +121,7 @@ COMMON_SRC = \
 	src/wipeout/particle.c \
 	src/wipeout/sfx.c \
 	src/wipeout/settings.c \
+	src/wipeout/xbr.c \
 	src/utils.c \
 	src/types.c \
 	src/system.c \

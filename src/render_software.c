@@ -106,6 +106,9 @@ void render_set_screen_size(vec2i_t size) {
 }
 
 void render_set_resolution(render_resolution_t res) {}
+void render_set_texture_upscale(bool xbr) {
+	(void) xbr;
+}
 void render_set_texture_smooth(bool smooth) {
 	(void) smooth;
 }
