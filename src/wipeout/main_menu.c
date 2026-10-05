@@ -394,6 +394,9 @@ SETTINGS_TOGGLE(toggle_lighting, lighting)
 SETTINGS_TOGGLE(toggle_split, split_vertical)
 SETTINGS_TOGGLE(toggle_default_view, external_view)
 SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
+SETTINGS_TOGGLE(toggle_texture_smooth, texture_smooth)
+
+static const char *opts_texture_filter[] = {"SHARP", "SMOOTH"};
 
 static const char *opts_bloom_threshold[] = {"DEFAULT", "LOW", "LOWER", "HIGH"};
 static const char *opts_split[] = {"HORIZONTAL", "VERTICAL"};
@@ -478,6 +481,7 @@ static void page_options_effects_init(menu_t *menu) {
 	menu_page_add_toggle(page, settings.lighting, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_lighting);
 	menu_page_add_toggle(page, percent_index(settings.lighting_brightness), "LIGHTING BRIGHTNESS", opts_percent, len(opts_percent), toggle_lighting_brightness);
 	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_point_lights);
+	menu_page_add_toggle(page, settings.texture_smooth, "TEXTURE FILTER", opts_texture_filter, len(opts_texture_filter), toggle_texture_smooth);
 }
 
 static void button_effects(menu_t *menu, int data) {
@@ -979,5 +983,13 @@ void main_menu_update(void) {
 	render_push_2d(vec2i(0, 0), render_size(), rgba(128, 128, 128, 255), background);
 
 	menu_update(main_menu);
+
+	// Tell the players who has the hand, and how
+	if (filter == 0) {
+		ui_draw_text_centered("PLAYER 1: GAMEPAD 1 OR KEYBOARD ARROWS", ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
+	else if (filter == 1) {
+		ui_draw_text_centered("PLAYER 2: GAMEPAD 2 OR KEYS I J K L, N TO SELECT", ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
 }
 

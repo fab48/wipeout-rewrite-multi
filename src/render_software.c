@@ -106,6 +106,12 @@ void render_set_screen_size(vec2i_t size) {
 }
 
 void render_set_resolution(render_resolution_t res) {}
+void render_set_texture_smooth(bool smooth) {
+	(void) smooth;
+}
+void render_set_sharp_pixels(bool sharp) {
+	(void) sharp;
+}
 void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness) {
 	(void) bloom_intensity;
 	(void) motion_blur_strength;

@@ -43,6 +43,12 @@ void render_set_lights(render_light_t *lights, int len) {
 void render_set_material(render_material_t material) {
 	(void) material;
 }
+void render_set_texture_smooth(bool smooth) {
+	(void) smooth;
+}
+void render_set_sharp_pixels(bool sharp) {
+	(void) sharp;
+}
 void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness) {
 	(void) bloom_intensity;
 	(void) motion_blur_strength;

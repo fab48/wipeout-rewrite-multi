@@ -781,6 +781,8 @@ static bool tonemap_enabled = true;
 static render_post_effect_t current_post_effect = RENDER_POST_NONE;
 static float bloom_intensity_scale = 1.0;
 static float motion_blur_scale = 1.0;
+static bool texture_smooth = true;
+static int sharp_pixels_depth = 0;
 static float draw_distance_factor = 1.0;
 
 #define ENV_SIZE 128
@@ -1136,6 +1138,7 @@ void render_frame_prepare(void) {
 	render_reset_viewport();
 
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (texture_smooth && sharp_pixels_depth == 0) ? GL_LINEAR : GL_NEAREST);
 	glUniform2f(prg_game->uniform.screen, 0, 0);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(true);
@@ -1462,6 +1465,28 @@ void render_set_draw_distance(float factor) {
 
 float render_draw_distance(void) {
 	return RENDER_FADEOUT_FAR * draw_distance_factor;
+}
+
+// Applies the wanted magnification filter to the atlas (which is the bound
+// texture during normal drawing)
+static void render_apply_mag_filter(void) {
+	render_flush();
+	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	bool linear = texture_smooth && sharp_pixels_depth == 0;
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+}
+
+void render_set_texture_smooth(bool smooth) {
+	texture_smooth = smooth;
+	render_apply_mag_filter();
+}
+
+void render_set_sharp_pixels(bool sharp) {
+	int before = sharp_pixels_depth;
+	sharp_pixels_depth = max(0, sharp_pixels_depth + (sharp ? 1 : -1));
+	if ((before == 0) != (sharp_pixels_depth == 0)) {
+		render_apply_mag_filter();
+	}
 }
 
 void render_set_view_2d(void) {

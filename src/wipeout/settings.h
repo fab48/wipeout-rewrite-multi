@@ -19,6 +19,7 @@ typedef struct {
 	bool lighting; // PBR
 	float lighting_brightness; // multiplier
 	int point_lights; // 0..6
+	bool texture_smooth; // linear magnification instead of the pixelated PSX look
 
 	bool split_vertical;
 	bool swap_gamepads;

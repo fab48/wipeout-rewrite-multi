@@ -183,6 +183,7 @@ void ui_draw_number(int num, vec2i_t pos, ui_text_size_t size, rgba_t color) {
 }
 
 void ui_draw_text(const char *text, vec2i_t pos, ui_text_size_t size, rgba_t color) {
+	render_set_sharp_pixels(true);
 	char_set_t *cs = &char_set[size];
 
 	for (int i = 0; text[i] != 0; i++) {
@@ -196,6 +197,7 @@ void ui_draw_text(const char *text, vec2i_t pos, ui_text_size_t size, rgba_t col
 			pos.x += 8 * ui_scale;
 		}
 	}
+	render_set_sharp_pixels(false);
 }
 
 void ui_draw_image(vec2i_t pos, uint16_t texture) {
@@ -204,7 +206,9 @@ void ui_draw_image(vec2i_t pos, uint16_t texture) {
 }
 
 void ui_draw_icon(ui_icon_type_t icon, vec2i_t pos, rgba_t color) {
+	render_set_sharp_pixels(true);
 	render_push_2d(pos, ui_scaled(render_texture_size(icon_textures[icon])), color, icon_textures[icon]);
+	render_set_sharp_pixels(false);
 }
 
 void ui_draw_text_centered(const char *text, vec2i_t pos, ui_text_size_t size, rgba_t color) {

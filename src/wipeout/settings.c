@@ -24,6 +24,7 @@ settings_t settings = {
 	.lighting = true,
 	.lighting_brightness = 1.0,
 	.point_lights = 4,
+	.texture_smooth = true,
 
 	.split_vertical = false,
 	.swap_gamepads = false,
@@ -53,6 +54,7 @@ static const setting_def_t setting_defs[] = {
 	{"lighting",             SETTING_BOOL,  &settings.lighting, 0, 1},
 	{"lighting_brightness",  SETTING_FLOAT, &settings.lighting_brightness, 0.25, 3.0},
 	{"point_lights",         SETTING_INT,   &settings.point_lights, 0, 6},
+	{"texture_smooth",       SETTING_BOOL,  &settings.texture_smooth, 0, 1},
 	{"split_vertical",       SETTING_BOOL,  &settings.split_vertical, 0, 1},
 	{"swap_gamepads",        SETTING_BOOL,  &settings.swap_gamepads, 0, 1},
 	{"external_view",        SETTING_BOOL,  &settings.external_view, 0, 1},
@@ -177,5 +179,6 @@ render_post_effect_t settings_post_flags(void) {
 void settings_apply(void) {
 	render_set_post_effect(settings_post_flags());
 	render_set_post_params(settings.bloom_intensity, settings.motion_blur_strength, settings.lighting_brightness);
+	render_set_texture_smooth(settings.texture_smooth);
 	input_set_gamepad_swap(settings.swap_gamepads);
 }
