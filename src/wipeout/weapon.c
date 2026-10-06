@@ -11,6 +11,7 @@
 #include "image.h"
 #include "particle.h"
 #include "camera.h"
+#include "netplay.h"
 
 typedef struct weapon_t {
 	float timer;
@@ -133,6 +134,21 @@ static void explosion_add(vec3_t pos, int particle_type) {
 		}
 	}
 	explosions[slot] = (explosion_fx_t){.pos = pos, .timer = EXPLOSION_DURATION, .color = color};
+}
+
+// Debris, a light flash and the explosion flash/shockwave. The flash sits at
+// pos + back: a weapon may already be a bit inside the wall it hit. The host
+// sends this to the LAN clients, which show it the same way.
+void weapons_explosion_fx(vec3_t pos, int particle_type, vec3_t base_velocity, vec3_t back) {
+	if (netplay_is_host()) {
+		netplay_event_explosion(pos, particle_type, base_velocity, back);
+	}
+	for (int p = 0; p < 32; p++) {
+		vec3_t velocity = vec3_add(base_velocity, vec3_rand(512));
+		particles_spawn(pos, particle_type, velocity, 256);
+	}
+	race_add_flash_light(vec3_add(pos, back), particle_type);
+	explosion_add(vec3_add(pos, back), particle_type);
 }
 
 static void explosions_update(void) {
@@ -266,18 +282,13 @@ void weapons_update(void) {
 			// Track collision
 			weapon->section = track_nearest_section(weapon->position, vec3(1,1,1), weapon->section, NULL);
 			if (weapon_collides_with_track(weapon)) {
-				for (int p = 0; p < 32; p++) {
-					vec3_t velocity = vec3_rand(512);
-					particles_spawn(weapon->position, weapon->track_hit_particle, velocity, 256);
-				}
 				// The weapon may already have passed through the wall a bit; put
 				// the light back in front of it, or the wall would be on the
 				// unlit side
 				vec3_t back = vec3_len(weapon->velocity) > 0.001
 					? vec3_mulf(vec3_normalize(weapon->velocity), -600)
 					: vec3(0, 0, 0);
-				race_add_flash_light(vec3_add(weapon->position, back), weapon->track_hit_particle);
-				explosion_add(vec3_add(weapon->position, back), weapon->track_hit_particle);
+				weapons_explosion_fx(weapon->position, weapon->track_hit_particle, vec3(0, 0, 0), back);
 				sfx_play_at(SFX_EXPLOSION_2, weapon->position, vec3(0,0,0), 1);
 				weapon->active = false;
 			}
@@ -462,12 +473,7 @@ ship_t *weapon_collides_with_ship(weapon_t *self) {
 		float distance = vec3_len(vec3_sub(ship->position, self->position));
 		if (distance < 512) {
 			vec3_t base_vel = vec3_mulf(ship->velocity, 0.25);
-			for (int p = 0; p < 32; p++) {
-				vec3_t velocity = vec3_add(base_vel, vec3_rand(512));
-				particles_spawn(self->position, self->ship_hit_particle, velocity, 256);
-			}
-			race_add_flash_light(self->position, self->ship_hit_particle);
-			explosion_add(self->position, self->ship_hit_particle);
+			weapons_explosion_fx(self->position, self->ship_hit_particle, base_vel, vec3(0, 0, 0));
 			return ship;
 		}
 	}
@@ -529,9 +535,7 @@ void weapon_update_mine_wait_for_release(weapon_t *self) {
 		self->track_hit_particle = PARTICLE_TYPE_NONE;
 		self->ship_hit_particle = PARTICLE_TYPE_FIRE;
 
-		if (ship_is_player(self->owner)) {
-			sfx_play(SFX_MINE_DROP);
-		}
+		netplay_sfx_play_for(self->owner, SFX_MINE_DROP, 0);
 	}
 }
 
@@ -567,7 +571,7 @@ void weapon_update_mine(weapon_t *self) {
 		if (flags_not(ship->flags, SHIP_SHIELDED)) {
 			if (ship_is_player(ship)) {
 				ship->velocity = vec3_sub(ship->velocity, vec3_mulf(ship->velocity, 0.125));
-				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
+				netplay_shake_for(ship, CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.125;
@@ -593,9 +597,7 @@ void weapon_fire_missile(ship_t *ship) {
 	self->drag = 0.25;
 	weapon_set_trajectory(self);
 
-	if (ship_is_player(self->owner)) {
-		sfx_play(SFX_MISSILE_FIRE);
-	}
+	netplay_sfx_play_for(self->owner, SFX_MISSILE_FIRE, 0);
 }
 
 void weapon_update_missile(weapon_t *self) {
@@ -617,7 +619,7 @@ void weapon_update_missile(weapon_t *self) {
 				ship->velocity = vec3_sub(ship->velocity, vec3_mulf(ship->velocity, 0.75));
 				ship->angular_velocity.z += rand_float(-0.1, 0.1);
 				ship->turn_rate_from_hit = rand_float(-0.1, 0.1);
-				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
+				netplay_shake_for(ship, CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.03125;
@@ -643,9 +645,7 @@ void weapon_fire_rocket(ship_t *ship) {
 	self->drag = 0.03125;
 	weapon_set_trajectory(self);
 
-	if (ship_is_player(self->owner)) {
-		sfx_play(SFX_MISSILE_FIRE);
-	}
+	netplay_sfx_play_for(self->owner, SFX_MISSILE_FIRE, 0);
 }
 
 void weapon_update_rocket(weapon_t *self) {
@@ -665,7 +665,7 @@ void weapon_update_rocket(weapon_t *self) {
 				ship->velocity = vec3_mulf(ship->velocity, 0.25);
 				ship->angular_velocity.z += rand_float(-0.1, 0.1);;
 				ship->turn_rate_from_hit = rand_float(-0.1, 0.1);;
-				camera_set_shake(game_ship_camera(ship), CAMERA_SHAKE_LONG);
+				netplay_shake_for(ship, CAMERA_SHAKE_LONG);
 			}
 			else {
 				ship->speed = ship->speed * 0.03125;
@@ -693,9 +693,7 @@ void weapon_fire_ebolt(ship_t *ship) {
 	self->drag = 0.25;
 	weapon_set_trajectory(self);
 
-	if (ship_is_player(self->owner)) {
-		sfx_play(SFX_EBOLT);
-	}
+	netplay_sfx_play_for(self->owner, SFX_EBOLT, 0);
 }
 
 void weapon_update_ebolt(weapon_t *self) {
@@ -763,12 +761,12 @@ void weapon_fire_turbo(ship_t *ship) {
 	float intensity;
 	if (ship_exhaust_light(ship, &pos, &intensity)) {
 		race_add_flash_light(pos, PARTICLE_TYPE_EBOLT);
+		if (netplay_is_host()) {
+			netplay_event_flash(pos, PARTICLE_TYPE_EBOLT);
+		}
 	}
-	
-	if (ship_is_player(ship)) {
-		sfx_t *sfx = sfx_play(SFX_MISSILE_FIRE);
-		sfx->pitch = 0.25;
-	}
+
+	netplay_sfx_play_for(ship, SFX_MISSILE_FIRE, 0.25);
 }
 
 int weapon_get_random_type(int type_class) {
@@ -813,3 +811,94 @@ int weapon_get_random_type(int type_class) {
 	}
 }
 
+
+
+// -----------------------------------------------------------------------------
+// LAN game: the host sends its weapons with every snapshot, the clients show
+// them. Weapons that are not visible yet (delayed fire, mines waiting to be
+// released) are not sent.
+
+int weapons_net_export(net_weapon_state_t *out, int max_len) {
+	int num = 0;
+	for (int i = 0; i < weapons_active && num < max_len; i++) {
+		weapon_t *weapon = &weapons[i];
+		uint8_t kind = 0;
+		if (weapon->update_func == weapon_update_shield) { kind = NET_WEAPON_SHIELD; }
+		else if (weapon->model == weapon_assets.mine) { kind = NET_WEAPON_MINE; }
+		else if (weapon->model == weapon_assets.missile) { kind = NET_WEAPON_MISSILE; }
+		else if (weapon->model == weapon_assets.rocket) { kind = NET_WEAPON_ROCKET; }
+		else if (weapon->model == weapon_assets.ebolt) { kind = NET_WEAPON_EBOLT; }
+		if (!kind) {
+			continue;
+		}
+		net_weapon_state_t *w = &out[num++];
+		w->kind = kind;
+		w->owner = weapon->owner->pilot;
+		w->position = weapon->position;
+		w->angle = weapon->angle;
+		w->velocity = weapon->velocity;
+		w->timer = weapon->timer;
+	}
+	return num;
+}
+
+void weapons_net_import(const net_weapon_state_t *in, int num, float age) {
+	weapons_active = 0;
+	for (int i = 0; i < num && i < WEAPONS_MAX; i++) {
+		const net_weapon_state_t *w = &in[i];
+		if (w->owner >= NUM_PILOTS) {
+			continue;
+		}
+		weapon_t *weapon = &weapons[weapons_active++];
+		memset(weapon, 0, sizeof(*weapon));
+		weapon->active = true;
+		weapon->owner = &g.ships[w->owner];
+		weapon->timer = w->timer - age;
+		weapon->angle = w->angle;
+		weapon->velocity = w->velocity;
+		weapon->position = vec3_add(w->position, vec3_mulf(w->velocity, 30 * age));
+		weapon->update_func = NULL;
+		weapon->trail_particle = PARTICLE_TYPE_NONE;
+		switch (w->kind) {
+			case NET_WEAPON_MINE:
+				weapon->model = weapon_assets.mine;
+				weapon->angle.y += age;
+				break;
+			case NET_WEAPON_MISSILE:
+				weapon->model = weapon_assets.missile;
+				weapon->trail_particle = PARTICLE_TYPE_SMOKE;
+				break;
+			case NET_WEAPON_ROCKET:
+				weapon->model = weapon_assets.rocket;
+				weapon->trail_particle = PARTICLE_TYPE_SMOKE;
+				break;
+			case NET_WEAPON_EBOLT:
+				weapon->model = weapon_assets.ebolt;
+				weapon->trail_particle = PARTICLE_TYPE_EBOLT;
+				break;
+			case NET_WEAPON_SHIELD:
+				weapon->model = weapon_assets.shield;
+				weapon->update_func = weapon_update_shield; // weapons_draw() looks for this
+				break;
+		}
+	}
+}
+
+// Client side, instead of weapons_update(): explosion animations and the smoke
+// trails of the projectiles
+void weapons_update_client(void) {
+	explosions_update();
+	float tick = system_tick();
+	for (int i = 0; i < weapons_active; i++) {
+		weapon_t *weapon = &weapons[i];
+		if (weapon->trail_particle == PARTICLE_TYPE_NONE) {
+			continue;
+		}
+		int count = (int)(tick / WEAPON_PARTICLE_SPAWN_RATE + rand_float(0, 1));
+		for (int p = 0; p < count; p++) {
+			float back = rand_float(0, 1) * 30 * tick;
+			vec3_t pos = vec3_sub(weapon->position, vec3_mulf(weapon->velocity, back));
+			particles_spawn(pos, weapon->trail_particle, vec3_rand(128), 128);
+		}
+	}
+}

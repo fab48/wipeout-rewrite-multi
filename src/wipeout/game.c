@@ -19,6 +19,7 @@
 #include "main_menu.h"
 #include "title.h"
 #include "intro.h"
+#include "netplay.h"
 
 #define TURN_ACCEL(V) NTSC_ACCELERATION(ANGLE_NORM_TO_RADIAN(FIXED_TO_FLOAT(YAW_VELOCITY(V))))
 #define TURN_VEL(V)   NTSC_VELOCITY(ANGLE_NORM_TO_RADIAN(FIXED_TO_FLOAT(YAW_VELOCITY(V))))
@@ -1049,6 +1050,8 @@ void game_init(void) {
 	g.camera = &g.cameras[0];
 	settings_apply();
 
+	netplay_init(system_argc(), system_argv());
+
 	game_set_scene(GAME_SCENE_INTRO);
 }
 
@@ -1060,6 +1063,18 @@ void game_bind_player2_controls(void) {
 			}
 		}
 	}
+}
+
+game_scene_t game_get_scene(void) {
+	return scene_next != GAME_SCENE_NONE ? scene_next : scene_current;
+}
+
+game_scene_t game_get_current_scene(void) {
+	return scene_current;
+}
+
+void game_cleanup(void) {
+	netplay_cleanup();
 }
 
 void game_set_scene(game_scene_t scene) {
@@ -1085,6 +1100,9 @@ void game_update(void) {
 	}
 	ui_set_scale(scale);
 
+
+	// Network I/O, and following the LAN host from scene to scene
+	netplay_update();
 
 	if (scene_next != GAME_SCENE_NONE) {
 		scene_current = scene_next;

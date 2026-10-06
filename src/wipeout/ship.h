@@ -173,6 +173,7 @@ uint16_t ship_ring_texture(void);
 void ship_spawn_impact_sparks(ship_t *self, vec3_t pos, vec3_t normal, float strength);
 void ship_draw_shadow(ship_t *self);
 void ship_update(ship_t *self);
+void ship_update_cosmetics(ship_t *self);
 void ship_collide_with_track(ship_t *self, track_face_t *face);
 void ship_collide_with_ship(ship_t *self, ship_t *other);
 

@@ -299,6 +299,7 @@ void platform_cleanup() {
 }
 
 sapp_desc sokol_main(int argc, char* argv[]) {
+	system_set_args(argc, argv);
 	temp_path = mem_bump(max(strlen(path_assets), strlen(path_userdata)) + 64);
 
 	stm_setup();

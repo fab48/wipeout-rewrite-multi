@@ -12,6 +12,21 @@ static double time_scaled;
 static double time_scale = 1.0;
 static double tick_last;
 static double cycle_time = 0;
+static int args_len = 0;
+static char **args = NULL;
+
+void system_set_args(int argc, char **argv) {
+	args_len = argc;
+	args = argv;
+}
+
+int system_argc(void) {
+	return args_len;
+}
+
+char **system_argv(void) {
+	return args;
+}
 
 void system_init(void) {
 	time_real = platform_now();
@@ -21,6 +36,7 @@ void system_init(void) {
 }
 
 void system_cleanup(void) {
+	game_cleanup();
 	render_cleanup();
 	input_cleanup();
 }

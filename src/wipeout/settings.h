@@ -27,6 +27,8 @@ typedef struct {
 	bool external_view;
 	int draw_distance; // 0..3: FULL, FAR, MEDIUM, NEAR
 
+	int net_pilot; // preferred pilot in LAN games
+
 	bool is_dirty;
 } settings_t;
 

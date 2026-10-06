@@ -31,6 +31,7 @@ settings_t settings = {
 	.swap_gamepads = false,
 	.external_view = false,
 	.draw_distance = 0,
+	.net_pilot = 0,
 
 	.is_dirty = false,
 };
@@ -61,6 +62,7 @@ static const setting_def_t setting_defs[] = {
 	{"swap_gamepads",        SETTING_BOOL,  &settings.swap_gamepads, 0, 1},
 	{"external_view",        SETTING_BOOL,  &settings.external_view, 0, 1},
 	{"draw_distance",        SETTING_INT,   &settings.draw_distance, 0, 3},
+	{"net_pilot",            SETTING_INT,   &settings.net_pilot, 0, 7},
 };
 
 static void setting_set(const setting_def_t *def, float value) {

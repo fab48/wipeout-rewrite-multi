@@ -14,11 +14,20 @@
 #include "ship_player.h"
 #include "ship_ai.h"
 #include "game.h"
+#include "netplay.h"
 
-// Maps a player 1 action to the action for the player controlling this ship
-#define PA(ACTION) ((ACTION) + (self->player == 1 ? A_P2_UP : 0))
+// Input of the player controlling this ship: player 1 or 2 on this machine,
+// or a player on another machine in a LAN game
+#define SHIP_INPUT(ACTION) netplay_input_state(self, ACTION)
+#define SHIP_PRESSED(ACTION) netplay_input_pressed(self, ACTION)
 
 void ship_player_update_sfx(ship_t *self) {
+	// A player on another machine sounds like any other ship here
+	if (!ship_is_local_player(self)) {
+		sfx_set_position(self->sfx_engine_thrust, self->position, self->velocity, 0.5);
+		return;
+	}
+
 	float speedf = self->speed * 0.000015;
 	self->sfx_engine_intake->volume = clamp(speedf, 0, 0.5);
 	self->sfx_engine_intake->pitch = 0.5 + speedf * 1.25;
@@ -37,10 +46,19 @@ void ship_player_update_sfx(ship_t *self) {
 void ship_player_update_intro(ship_t *self) {
 	self->temp_target = self->position;
 
-	self->sfx_engine_thrust = sfx_reserve_loop(SFX_ENGINE_THRUST);
-	self->sfx_engine_intake = sfx_reserve_loop(SFX_ENGINE_INTAKE);
-	self->sfx_shield = sfx_reserve_loop(SFX_SHIELD);
-	self->sfx_turbulence = sfx_reserve_loop(SFX_TURBULENCE);
+	if (ship_is_local_player(self)) {
+		self->sfx_engine_thrust = sfx_reserve_loop(SFX_ENGINE_THRUST);
+		self->sfx_engine_intake = sfx_reserve_loop(SFX_ENGINE_INTAKE);
+		self->sfx_shield = sfx_reserve_loop(SFX_SHIELD);
+		self->sfx_turbulence = sfx_reserve_loop(SFX_TURBULENCE);
+	}
+	else {
+		self->sfx_engine_thrust = sfx_reserve_loop(SFX_ENGINE_REMOTE);
+		self->sfx_engine_intake = NULL;
+		self->sfx_shield = NULL;
+		self->sfx_turbulence = NULL;
+		sfx_set_position(self->sfx_engine_thrust, self->position, self->velocity, 0.1);
+	}
 
 	ship_player_update_intro_general(self);
 	self->update_func = ship_player_update_intro_await_three;
@@ -50,7 +68,7 @@ void ship_player_update_intro_await_three(ship_t *self) {
 	ship_player_update_intro_general(self);
 
 	if (self->update_timer <= UPDATE_TIME_THREE) {
-		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_3); }
+		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_3); netplay_event_countdown(3); }
 		self->update_func = ship_player_update_intro_await_two;
 	}
 }
@@ -60,7 +78,7 @@ void ship_player_update_intro_await_two(ship_t *self) {
 
 	if (self->update_timer <= UPDATE_TIME_TWO) {
 		scene_set_start_booms(1);
-		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_2); }
+		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_2); netplay_event_countdown(2); }
 		self->update_func = ship_player_update_intro_await_one;
 	}
 }
@@ -70,7 +88,7 @@ void ship_player_update_intro_await_one(ship_t *self) {
 
 	if (self->update_timer <= UPDATE_TIME_ONE) {
 		scene_set_start_booms(2);
-		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_1); }
+		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_1); netplay_event_countdown(1); }
 		self->update_func = ship_player_update_intro_await_go;
 	}
 }
@@ -80,7 +98,7 @@ void ship_player_update_intro_await_go(ship_t *self) {
 
 	if (self->update_timer <= UPDATE_TIME_GO) {
 		scene_set_start_booms(3);
-		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_GO); }
+		if (self->player <= 0) { sfx_play(SFX_VOICE_COUNT_GO); netplay_event_countdown(0); }
 		
 		if (flags_is(self->flags, SHIP_RACING)) {
 			// Check for stall
@@ -109,8 +127,8 @@ void ship_player_update_intro_general(ship_t *self) {
 	self->position.y = self->temp_target.y + sinf(self->update_timer * 80.0 * 30.0 * M_PI * 2.0 / 4096.0) * 32;
 
 	// Thrust
-	if (input_state(PA(A_THRUST))) {
-		self->thrust_mag += input_state(PA(A_THRUST)) * SHIP_THRUST_RATE * system_tick();
+	if (SHIP_INPUT(A_THRUST)) {
+		self->thrust_mag += SHIP_INPUT(A_THRUST) * SHIP_THRUST_RATE * system_tick();
 	}
 	else {
 		self->thrust_mag -= SHIP_THRUST_RATE * system_tick();
@@ -119,7 +137,7 @@ void ship_player_update_intro_general(ship_t *self) {
 	self->thrust_mag = clamp(self->thrust_mag, 0, self->thrust_max);
 
 	// View
-	if (input_pressed(PA(A_CHANGE_VIEW))) {
+	if (SHIP_PRESSED(A_CHANGE_VIEW)) {
 		if (flags_not(self->flags, SHIP_VIEW_INTERNAL)) {
 			game_ship_camera(self)->update_func = camera_update_race_internal;
 			flags_add(self->flags, SHIP_VIEW_INTERNAL);
@@ -173,23 +191,23 @@ void ship_player_update_race(ship_t *self) {
 	// will have no influence on the original behavior.
 	self->angular_acceleration = vec3(0, 0, 0);
 
-	if (input_state(PA(A_LEFT))) {
+	if (SHIP_INPUT(A_LEFT)) {
 		if (self->angular_velocity.y < 0) {
 			self->angular_acceleration.y += self->turn_rate * 2;
 		}
 		else {
-			float turn_target = powf(input_state(PA(A_LEFT)), save.analog_response);
+			float turn_target = powf(SHIP_INPUT(A_LEFT), netplay_analog_response(self));
 			if (turn_target * self->turn_rate_max > self->angular_velocity.y) {
 				self->angular_acceleration.y += self->turn_rate;
 			}
 		}
 	}
-	else if (input_state(PA(A_RIGHT))) {
+	else if (SHIP_INPUT(A_RIGHT)) {
 		if (self->angular_velocity.y > 0) {
 			self->angular_acceleration.y -= self->turn_rate * 2;
 		}
 		else {
-			float turn_target = powf(input_state(PA(A_RIGHT)), save.analog_response);
+			float turn_target = powf(SHIP_INPUT(A_RIGHT), netplay_analog_response(self));
 			if (turn_target * -self->turn_rate_max < self->angular_velocity.y) {	
 				self->angular_acceleration.y -= self->turn_rate;
 			}
@@ -202,8 +220,8 @@ void ship_player_update_race(ship_t *self) {
 		// Yank the ship every 0.1 seconds
 		if (self->ebolt_effect_timer > 0.1) {
 			self->ebolt_effect_timer -= 0.1;
-			if (flags_is(self->flags, SHIP_VIEW_INTERNAL)) {
-				camera_set_shake(game_ship_camera(self), CAMERA_SHAKE_SHORT);
+			if (flags_is(self->flags, SHIP_VIEW_INTERNAL) || ship_is_remote_player(self)) {
+				netplay_shake_for(self, CAMERA_SHAKE_SHORT);
 			}
 			self->angular_velocity.y += rand_float(-0.5, 0.5);
 
@@ -213,8 +231,8 @@ void ship_player_update_race(ship_t *self) {
 		}
 	}
 
-	self->angular_acceleration.x += input_state(PA(A_DOWN)) * SHIP_PITCH_ACCEL;
-	self->angular_acceleration.x -= input_state(PA(A_UP)) * SHIP_PITCH_ACCEL;
+	self->angular_acceleration.x += SHIP_INPUT(A_DOWN) * SHIP_PITCH_ACCEL;
+	self->angular_acceleration.x -= SHIP_INPUT(A_UP) * SHIP_PITCH_ACCEL;
 
 	// Handle Stall
 	if (self->update_timer > 0) {
@@ -229,8 +247,8 @@ void ship_player_update_race(ship_t *self) {
 	}
 
 	// Thrust
-	if (input_state(PA(A_THRUST))) {
-		self->thrust_mag += input_state(PA(A_THRUST)) * SHIP_THRUST_RATE * system_tick();
+	if (SHIP_INPUT(A_THRUST)) {
+		self->thrust_mag += SHIP_INPUT(A_THRUST) * SHIP_THRUST_RATE * system_tick();
 	}
 	else {
 		self->thrust_mag -= SHIP_THRUST_FALLOFF * system_tick();
@@ -238,7 +256,7 @@ void ship_player_update_race(ship_t *self) {
 	self->thrust_mag = clamp(self->thrust_mag, 0, self->current_thrust_max);
 
 	// Brake
-	if (input_state(PA(A_BRAKE_RIGHT)))	{
+	if (SHIP_INPUT(A_BRAKE_RIGHT))	{
 		self->brake_right += SHIP_BRAKE_RATE * system_tick();
 	}
 	else if (self->brake_right > 0) {
@@ -246,7 +264,7 @@ void ship_player_update_race(ship_t *self) {
 	}
 	self->brake_right = clamp(self->brake_right, 0, 256);
 
-	if (input_state(PA(A_BRAKE_LEFT)))	{
+	if (SHIP_INPUT(A_BRAKE_LEFT))	{
 		self->brake_left += SHIP_BRAKE_RATE * system_tick();
 	}
 	else if (self->brake_left > 0) {
@@ -255,7 +273,7 @@ void ship_player_update_race(ship_t *self) {
 	self->brake_left = clamp(self->brake_left, 0, 256);
 
 	// View
-	if (input_pressed(PA(A_CHANGE_VIEW))) {
+	if (SHIP_PRESSED(A_CHANGE_VIEW)) {
 		if (flags_not(self->flags, SHIP_VIEW_INTERNAL)) {
 			game_ship_camera(self)->update_func = camera_update_race_internal;
 			flags_add(self->flags, SHIP_VIEW_INTERNAL);
@@ -276,12 +294,12 @@ void ship_player_update_race(ship_t *self) {
 	// Fire
 	// self->weapon_type = WEAPON_TYPE_MISSILE; // Test weapon
 
-	if (input_pressed(PA(A_FIRE)) && self->weapon_type != WEAPON_TYPE_NONE) {
+	if (SHIP_PRESSED(A_FIRE) && self->weapon_type != WEAPON_TYPE_NONE) {
 		if (flags_not(self->flags, SHIP_SHIELDED)) {
 			weapons_fire(self, self->weapon_type);
 		}
 		else {
-			sfx_play(SFX_MENU_MOVE);
+			netplay_sfx_play_for(self, SFX_MENU_MOVE, 0);
 		}
 	}
 

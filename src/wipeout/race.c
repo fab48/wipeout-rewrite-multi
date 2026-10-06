@@ -18,6 +18,7 @@
 #include "particle.h"
 #include "menu.h"
 #include "ingame_menus.h"
+#include "netplay.h"
 
 #define ATTRACT_DURATION 60.0
 
@@ -214,6 +215,16 @@ void race_init(void) {
 	}
 
 	is_paused = false;
+	netplay_race_init();
+}
+
+void race_show_menu(menu_t *menu) {
+	active_menu = menu;
+	menu_is_scroll_text = false;
+}
+
+bool race_menu_is_open(void) {
+	return active_menu != NULL;
 }
 
 void race_update(void) {
@@ -228,19 +239,27 @@ void race_update(void) {
 	else {
 		g.view_player = 0;
 		g.camera = &g.cameras[0];
-		ships_update();
-		for (int p = 0; p < g.num_players; p++) {
-			ship_t *ship = game_player_ship(p);
-			droid_update(&g.droids[p], ship);
-			camera_update(&g.cameras[p], ship, &g.droids[p]);
+		if (netplay_is_client()) {
+			// LAN client: everything comes from the host
+			netplay_client_race_update();
 		}
-		weapons_update();
+		else if (!netplay_race_waiting()) {
+			netplay_host_race_update_begin();
+			ships_update();
+			for (int p = 0; p < g.num_players; p++) {
+				ship_t *ship = game_player_ship(p);
+				droid_update(&g.droids[p], ship);
+				camera_update(&g.cameras[p], ship, &g.droids[p]);
+			}
+			weapons_update();
+			if (g.race_type != RACE_TYPE_TIME_TRIAL) {
+				track_cycle_pickups();
+			}
+			netplay_host_race_update_end();
+		}
 		particles_update();
 		race_update_flash_lights();
 		scene_update();
-		if (g.race_type != RACE_TYPE_TIME_TRIAL) {
-			track_cycle_pickups();
-		}
 
 		if (g.is_attract_mode) {
 			if (input_pressed(A_MENU_START) || input_pressed(A_MENU_SELECT)) {
@@ -276,6 +295,7 @@ void race_update(void) {
 		for (int d = 0; d < g.num_players; d++) {
 			droid_draw(&g.droids[d]);
 		}
+		netplay_race_draw_droids();
 		weapons_draw();
 		render_set_material(RENDER_MATERIAL_UNLIT);
 		particles_draw();
@@ -299,8 +319,9 @@ void race_update(void) {
 
 	for (int p = 0; p < g.num_players; p++) {
 		race_set_player_view(p, screen);
-		if (g.num_players > 1) {
+		if (g.num_players > 1 || netplay_active()) {
 			// The HUD needs the 3d view of this player for the target reticle
+			// and the name tags
 			render_set_view(g.camera->position, g.camera->angle);
 		}
 		render_set_view_2d();
@@ -312,7 +333,7 @@ void race_update(void) {
 				hud_draw_player_marker(game_player_ship(1 - p), p == 0 ? "P2" : "P1");
 			}
 		}
-		else if (g.num_players > 1 && !g.is_attract_mode && ship->lap >= NUM_LAPS) {
+		else if ((g.num_players > 1 || netplay_active()) && !g.is_attract_mode && ship->lap >= NUM_LAPS) {
 			ui_draw_text_centered("FINISHED", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_16, UI_COLOR_ACCENT);
 			ui_draw_text_centered("POSITION", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(-12, 0)), UI_SIZE_12, UI_COLOR_DEFAULT);
 			ui_draw_number(g.finish_rank[p], ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(44, 0)), UI_SIZE_12, UI_COLOR_DEFAULT);
@@ -322,6 +343,11 @@ void race_update(void) {
 	ui_set_scale(ui_scale);
 	race_set_player_view(0, screen);
 	render_reset_viewport();
+	if (netplay_active()) {
+		render_set_view(g.camera->position, g.camera->angle);
+		render_set_view_2d();
+		netplay_race_draw_hud();
+	}
 	render_set_view_2d();
 
 	if (g.num_players > 1) {
@@ -484,7 +510,7 @@ void race_next(void) {
 	}
 }
 
-static void race_release_ship(ship_t *ship) {
+void race_release_ship(ship_t *ship) {
 	flags_rm(ship->flags, SHIP_RACING);
 	ship->remote_thrust_max = 3160;
 	ship->remote_thrust_mag = 32;
@@ -501,6 +527,12 @@ void race_release_control(void) {
 // Called when a player crosses the finish line after the last lap. In split
 // screen the race goes on until everybody is done.
 void race_player_finished(ship_t *ship) {
+	// LAN game: the race goes on until all humans are through
+	if (netplay_active()) {
+		netplay_player_finished(ship);
+		return;
+	}
+
 	g.finish_rank[ship->player] = ship->position_rank;
 
 	// Split screen: the first player over the line wins, the race is over for
@@ -517,6 +549,11 @@ void race_player_finished(ship_t *ship) {
 }
 
 void race_pause(void) {
+	// LAN game: the race can't stop for one player; just show the menu
+	if (netplay_active()) {
+		active_menu = netplay_pause_menu_init();
+		return;
+	}
 	sfx_pause();
 	is_paused = true;
 }

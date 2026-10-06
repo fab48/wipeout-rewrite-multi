@@ -281,6 +281,7 @@ typedef struct {
 	// camera points to the camera of the view that is currently updated/drawn
 	camera_t cameras[MAX_PLAYERS];
 	camera_t *camera;
+	camera_t camera_remote; // stands in for the camera of a player on another machine
 	droid_t droids[MAX_PLAYERS];
 	ship_t ships[NUM_PILOTS];
 	track_t track;
@@ -334,6 +335,9 @@ extern const game_def_t def;
 extern game_t g;
 
 static inline camera_t *game_ship_camera(ship_t *ship) {
+	if (ship->player >= MAX_PLAYERS) {
+		return &g.camera_remote; // LAN game: that camera is on the other machine
+	}
 	return &g.cameras[ship->player > 0 ? ship->player : 0];
 }
 
@@ -362,7 +366,10 @@ extern save2_t save2;
 void game_bind_player2_controls(void);
 
 void game_init(void);
+void game_cleanup(void);
 void game_set_scene(game_scene_t scene);
+game_scene_t game_get_scene(void); // the next scene, if one is pending
+game_scene_t game_get_current_scene(void);
 void game_reset_championship(void);
 void game_update(void);
 

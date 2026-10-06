@@ -9,6 +9,14 @@
 
 /wipegame
 /wipegame.exe
+/wipegame-headless
+/wipegame-headless.exe
+/net-test
+/net-test.exe
+/lan.txt
+/settings.txt
+/controls2.dat
 /save.dat
 .DS_Store
 gamecontrollerdb.txt
+*.dll
