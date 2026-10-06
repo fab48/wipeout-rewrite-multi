@@ -112,13 +112,20 @@ vec2i_t ui_scaled_pos(ui_pos_t anchor, vec2i_t offset) {
 	return pos;
 }
 
-#define char_to_glyph_index(C) (C >= '0' && C <= '9' ? (C - '0' + 26) : C - 'A')
+// A..Z, 0..9 and the two special glyphs for ':' and '.' ('e' and 'f', see
+// ui_draw_time). -1 for everything else, which is drawn as a space: a '-' in
+// a player name used to read outside of the glyph table.
+static inline int char_to_glyph_index(char c) {
+	int index = (c >= '0' && c <= '9') ? (c - '0' + 26) : (c - 'A');
+	return (index >= 0 && index < (int)len(char_set[0].glyphs)) ? index : -1;
+}
 
 int ui_char_width(char c, ui_text_size_t size) {
-	if (c == ' ') {
+	int index = char_to_glyph_index(c);
+	if (index < 0) {
 		return 8;
 	}
-	return char_set[size].glyphs[char_to_glyph_index(c)].width;
+	return char_set[size].glyphs[index].width;
 }
 
 int ui_text_width(const char *text, ui_text_size_t size) {
@@ -126,9 +133,8 @@ int ui_text_width(const char *text, ui_text_size_t size) {
 	char_set_t *cs = &char_set[size];
 
 	for (int i = 0; text[i] != 0; i++) {
-		width += text[i] != ' '
-			? cs->glyphs[char_to_glyph_index(text[i])].width
-			: 8;
+		int index = char_to_glyph_index(text[i]);
+		width += index >= 0 ? cs->glyphs[index].width : 8;
 	}
 
 	return width;
@@ -187,8 +193,9 @@ void ui_draw_text(const char *text, vec2i_t pos, ui_text_size_t size, rgba_t col
 	char_set_t *cs = &char_set[size];
 
 	for (int i = 0; text[i] != 0; i++) {
-		if (text[i] != ' ') {
-			glyph_t *glyph = &cs->glyphs[char_to_glyph_index(text[i])];
+		int index = char_to_glyph_index(text[i]);
+		if (index >= 0) {
+			glyph_t *glyph = &cs->glyphs[index];
 			vec2i_t size = vec2i(glyph->width, cs->height);
 			render_push_2d_tile(pos, glyph->offset, size, ui_scaled(size), color, cs->texture);
 			pos.x += glyph->width * ui_scale;

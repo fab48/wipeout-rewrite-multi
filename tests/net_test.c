@@ -187,7 +187,7 @@ static void test_messages_roundtrip(void) {
 	CHECK(net_decode_join(buf, len, &join2));
 	CHECK_EQ_INT(join2.nonce, 1234);
 	CHECK_EQ_INT(join2.pref_pilot, 5);
-	CHECK(strcmp(join2.name, "FAB-1.X") == 0); // upper case for the UI font
+	CHECK(strcmp(join2.name, "FAB 1 X") == 0); // only what the UI font can draw
 
 	net_msg_client_state_t cs, cs2;
 	memset(&cs, 0, sizeof(cs));
@@ -231,6 +231,36 @@ static void test_messages_roundtrip(void) {
 
 	// Too small a buffer: no partial packet
 	CHECK_EQ_INT(net_encode_lobby(buf, 20, &lobby), 0);
+}
+
+static void test_names(void) {
+	struct { const char *in, *out; } cases[] = {
+		{"Fab-Asus", "FAB ASUS"},
+		{"fab_asus--pc", "FAB ASUS P"},
+		{"  --Fab  ", "FAB"},
+		{"DESKTOP-4F2K9QZ", "DESKTOP 4F"},
+		{"\xc3\xa9t\xc3\xa9", "T"},
+		{"!!!", "PLAYER"},
+		{"", "PLAYER"},
+		{"ABCDEFGHIJKLMNOP", "ABCDEFGHIJ"},
+	};
+	for (int i = 0; i < (int)(sizeof(cases) / sizeof(cases[0])); i++) {
+		char name[NET_NAME_LEN];
+		net_sanitize_name(name, cases[i].in);
+		if (strcmp(name, cases[i].out) != 0) {
+			printf("    \"%s\" -> \"%s\", expected \"%s\"\n", cases[i].in, name, cases[i].out);
+			checks_failed++;
+		}
+		CHECK((int)strlen(name) <= NET_NAME_MAX_CHARS);
+	}
+
+	// Whatever comes over the network ends up clean as well
+	uint8_t buf[256];
+	net_msg_join_t join = {.nonce = 1, .pref_pilot = 0}, out;
+	memcpy(join.name, "a-b.c_d#e\x01\xff", 12);
+	int len = net_encode_join(buf, sizeof(buf), &join);
+	CHECK(net_decode_join(buf, len, &out));
+	CHECK(strcmp(out.name, "A B C D E") == 0);
 }
 
 static void test_snapshot_rejects_non_finite(void) {
@@ -758,6 +788,7 @@ int main(int argc, char **argv) {
 
 	printf("protocol\n");
 	run_test("messages round trip", test_messages_roundtrip);
+	run_test("player names", test_names);
 	run_test("snapshot round trip", test_snapshot_roundtrip);
 	run_test("snapshot rejects NaN / inf", test_snapshot_rejects_non_finite);
 	run_test("fuzzed decoders", test_fuzz_decoders);

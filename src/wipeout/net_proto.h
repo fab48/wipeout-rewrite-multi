@@ -18,6 +18,7 @@
 #define NET_MAX_EVENTS       48
 #define NET_MAX_PICKUPS      256
 #define NET_NAME_LEN         16
+#define NET_NAME_MAX_CHARS   10  // shown in the lobby and above the ships
 #define NET_NUM_ACTIONS      9   // A_UP .. A_CHANGE_VIEW
 #define NET_NUM_LAPS         3
 #define NET_MAX_PACKET       8192
@@ -74,6 +75,10 @@ void net_write_f32(net_writer_t *w, float v);
 void net_write_vec3(net_writer_t *w, vec3_t v);
 void net_write_bytes(net_writer_t *w, const void *src, int len);
 void net_write_header(net_writer_t *w, net_msg_type_t type);
+
+// Player names: upper case A..Z and 0..9; anything else becomes a single
+// space ("Fab-Asus" -> "FAB ASUS"), at most NET_NAME_MAX_CHARS, never empty.
+void net_sanitize_name(char dst[NET_NAME_LEN], const char *src);
 
 void net_reader_init(net_reader_t *r, const uint8_t *data, int len);
 uint8_t net_read_u8(net_reader_t *r);

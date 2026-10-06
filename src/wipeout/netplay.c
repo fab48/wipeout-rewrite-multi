@@ -80,10 +80,7 @@ static void netplay_default_name(char *name) {
 	if (!env) { env = getenv("HOSTNAME"); }
 	if (!env) { env = getenv("USER"); }
 	if (!env) { env = "PLAYER"; }
-	memset(name, 0, NET_NAME_LEN);
-	for (int i = 0; env[i] && i < 10; i++) {
-		name[i] = toupper((unsigned char)env[i]);
-	}
+	net_sanitize_name(name, env);
 }
 
 // lan.txt next to save.dat: "name = FAB", "join = 192.168.1.20", "port = 47800"
@@ -107,10 +104,7 @@ static void netplay_load_config(void) {
 		char key[32], value[128];
 		if (sscanf(line, " %31[a-z_] = %127s", key, value) == 2) {
 			if (strcmp(key, "name") == 0) {
-				memset(np.name, 0, NET_NAME_LEN);
-				for (int i = 0; value[i] && i < 10; i++) {
-					np.name[i] = toupper((unsigned char)value[i]);
-				}
+				net_sanitize_name(np.name, value);
 			}
 			else if (strcmp(key, "join") == 0) {
 				snprintf(np.cmd_join, sizeof(np.cmd_join), "%s", value);
@@ -147,10 +141,7 @@ void netplay_init(int argc, char **argv) {
 			i++;
 		}
 		else if (strcmp(arg, "--name") == 0 && val) {
-			memset(np.name, 0, NET_NAME_LEN);
-			for (int c = 0; val[c] && c < 10; c++) {
-				np.name[c] = toupper((unsigned char)val[c]);
-			}
+			net_sanitize_name(np.name, val);
 			i++;
 		}
 		else if (strcmp(arg, "--pilot") == 0 && val) {

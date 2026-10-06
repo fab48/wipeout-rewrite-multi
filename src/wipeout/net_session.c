@@ -57,10 +57,7 @@ void net_session_init(net_session_t *s) {
 }
 
 static void net_copy_name(char *dst, const char *src) {
-	memset(dst, 0, NET_NAME_LEN);
-	for (int i = 0; src && src[i] && i < NET_NAME_LEN - 1; i++) {
-		dst[i] = src[i];
-	}
+	net_sanitize_name(dst, src);
 }
 
 static void net_send(net_session_t *s, net_addr_t to, const uint8_t *data, int len) {

@@ -174,20 +174,36 @@ static void net_write_name(net_writer_t *w, const char *name) {
 	net_write_bytes(w, padded, NET_NAME_LEN);
 }
 
-static void net_read_name(net_reader_t *r, char *name) {
-	net_read_bytes(r, name, NET_NAME_LEN);
-	name[NET_NAME_LEN - 1] = '\0';
-
-	// Only what the UI font can draw
-	for (int i = 0; name[i]; i++) {
-		char c = name[i];
+void net_sanitize_name(char dst[NET_NAME_LEN], const char *src) {
+	char out[NET_NAME_LEN];
+	int len = 0;
+	bool pending_space = false;
+	for (int i = 0; src && src[i] && len < NET_NAME_MAX_CHARS; i++) {
+		char c = src[i];
 		if (c >= 'a' && c <= 'z') {
-			name[i] = c - 'a' + 'A';
+			c = c - 'a' + 'A';
 		}
-		else if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '.')) {
-			name[i] = '-';
+		if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			if (pending_space && len > 0 && len < NET_NAME_MAX_CHARS - 1) {
+				out[len++] = ' ';
+			}
+			pending_space = false;
+			out[len++] = c;
+		}
+		else {
+			pending_space = true;
 		}
 	}
+	out[len] = '\0';
+	memset(dst, 0, NET_NAME_LEN);
+	memcpy(dst, len ? out : "PLAYER", len ? len : 6);
+}
+
+static void net_read_name(net_reader_t *r, char *name) {
+	char raw[NET_NAME_LEN + 1];
+	net_read_bytes(r, raw, NET_NAME_LEN);
+	raw[NET_NAME_LEN] = '\0';
+	net_sanitize_name(name, raw);
 }
 
 static int net_writer_finish(net_writer_t *w) {
