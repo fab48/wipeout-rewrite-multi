@@ -266,11 +266,13 @@ void input_set_button_state(button_t button, float state) {
 		}
 	}
 
-	// Menus for one player only (team/pilot selection in split screen)
+	// Menus for one player only (team/pilot selection in split screen): the
+	// other player's gamepad is ignored. The keyboard is shared and always
+	// goes through, or a player without a gamepad could get stuck.
 	if (player_filter >= 0 && !capture_callback) {
-		bool is_player2 = input_button_belongs_to_player2(button);
-		bool is_mouse = button >= INPUT_MOUSE_LEFT;
-		if (!is_mouse && is_player2 != (player_filter == 1)) {
+		bool is_gamepad1 = button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT;
+		bool is_gamepad2 = input_button_belongs_to_player2(button) && button >= INPUT_GAMEPAD2_A;
+		if ((player_filter == 0 && is_gamepad2) || (player_filter == 1 && is_gamepad1)) {
 			return;
 		}
 	}

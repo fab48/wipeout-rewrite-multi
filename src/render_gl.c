@@ -29,11 +29,16 @@
 #include "render.h"
 #include "mem.h"
 #include "utils.h"
+#include "wipeout/xbr.h"
 
 
-#define ATLAS_SIZE 64
+// The atlas holds the textures upscaled by TEXTURE_SCALE (2): 128 cells of
+// 32 pixels = 4096x4096. If the GPU can't do that, texture_scale drops to 1
+// and only the first 64 cells are used.
+#define ATLAS_SIZE 128
 #define ATLAS_GRID 32
 #define ATLAS_BORDER 16
+#define TEXTURE_SCALE_MAX 2
 
 #define RENDER_TRIS_BUFFER_CAPACITY 8192
 #define TEXTURES_MAX 1024
@@ -160,7 +165,8 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	uniform vec3 camera_pos;
 	uniform vec2 fade;
 	uniform float time;
-	
+	uniform float atlas_size; // in pixels
+
 	void main(void) {
 		// Everything for the lighting is in view space. -Y is up.
 		vec4 view_pos = view * model * vec4(pos, 1.0);
@@ -202,7 +208,7 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 			fade.y, fade.x, // fadeout far, near
 			length(vec4(camera_pos, 1.0) - model * vec4(pos, 1.0))
 		);
-		v_uv = uv / 2048.0; // ATLAS_GRID * ATLAS_SIZE
+		v_uv = uv / atlas_size;
 	}
 );
 
@@ -422,6 +428,7 @@ typedef struct {
 		GLuint camera_pos;
 		GLuint fade;
 		GLuint time;
+		GLuint atlas_size;
 		GLuint material;
 		GLuint tonemap;
 		GLuint lighting_scale;
@@ -451,6 +458,7 @@ prg_game_t *shader_game_init(void) {
 	s->uniform.screen = glGetUniformLocation(s->program, "screen");
 	s->uniform.camera_pos = glGetUniformLocation(s->program, "camera_pos");
 	s->uniform.fade = glGetUniformLocation(s->program, "fade");
+	s->uniform.atlas_size = glGetUniformLocation(s->program, "atlas_size");
 	s->uniform.material = glGetUniformLocation(s->program, "material");
 	s->uniform.tonemap = glGetUniformLocation(s->program, "tonemap");
 	s->uniform.lighting_scale = glGetUniformLocation(s->program, "lighting_scale");
@@ -731,6 +739,9 @@ static vec2i_t backbuffer_size;
 static vec2i_t viewport_size;
 
 static uint32_t atlas_map[ATLAS_SIZE] = {0};
+static int texture_scale = TEXTURE_SCALE_MAX; // 2, or 1 if the GPU can't do a 4096 atlas
+static int atlas_cells = ATLAS_SIZE;
+static bool texture_upscale_xbr = true;
 static GLuint atlas_texture = 0;
 static render_blend_mode_t blend_mode = RENDER_BLEND_NORMAL;
 
@@ -781,6 +792,8 @@ static bool tonemap_enabled = true;
 static render_post_effect_t current_post_effect = RENDER_POST_NONE;
 static float bloom_intensity_scale = 1.0;
 static float motion_blur_scale = 1.0;
+static bool texture_smooth = true;
+static int sharp_pixels_depth = 0;
 static float draw_distance_factor = 1.0;
 
 #define ENV_SIZE 128
@@ -847,8 +860,15 @@ void render_init(vec2i_t screen_size) {
 	// 4x is plenty for these textures and much cheaper than 16x on old GPUs
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, min(anisotropy, 4.0));
 
-	uint32_t tw = ATLAS_SIZE * ATLAS_GRID;
-	uint32_t th = ATLAS_SIZE * ATLAS_GRID;
+	GLint max_texture_size = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+	if (max_texture_size < ATLAS_SIZE * ATLAS_GRID) {
+		texture_scale = 1;
+		atlas_cells = ATLAS_SIZE / TEXTURE_SCALE_MAX;
+		printf("no 2x textures: max texture size is %d\n", max_texture_size);
+	}
+	uint32_t tw = atlas_cells * ATLAS_GRID;
+	uint32_t th = atlas_cells * ATLAS_GRID;
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	printf("atlas texture %5d\n", atlas_texture);
 	
@@ -875,6 +895,7 @@ void render_init(vec2i_t screen_size) {
 	prg_game = shader_game_init();
 	use_program(prg_game);
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, mat4_identity().m);
+	glUniform1f(prg_game->uniform.atlas_size, atlas_cells * ATLAS_GRID);
 	render_apply_material();
 	glUniform1f(prg_game->uniform.lights_len, 0);
 	glUniform1f(prg_game->uniform.tonemap, 1.0);
@@ -1136,6 +1157,7 @@ void render_frame_prepare(void) {
 	render_reset_viewport();
 
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (texture_smooth && sharp_pixels_depth == 0) ? GL_LINEAR : GL_NEAREST);
 	glUniform2f(prg_game->uniform.screen, 0, 0);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(true);
@@ -1464,6 +1486,28 @@ float render_draw_distance(void) {
 	return RENDER_FADEOUT_FAR * draw_distance_factor;
 }
 
+// Applies the wanted magnification filter to the atlas (which is the bound
+// texture during normal drawing)
+static void render_apply_mag_filter(void) {
+	render_flush();
+	glBindTexture(GL_TEXTURE_2D, atlas_texture);
+	bool linear = texture_smooth && sharp_pixels_depth == 0;
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+}
+
+void render_set_texture_smooth(bool smooth) {
+	texture_smooth = smooth;
+	render_apply_mag_filter();
+}
+
+void render_set_sharp_pixels(bool sharp) {
+	int before = sharp_pixels_depth;
+	sharp_pixels_depth = max(0, sharp_pixels_depth + (sharp ? 1 : -1));
+	if ((before == 0) != (sharp_pixels_depth == 0)) {
+		render_apply_mag_filter();
+	}
+}
+
 void render_set_view_2d(void) {
 	render_flush();
 	render_set_depth_test(false);
@@ -1604,9 +1648,10 @@ void render_push_tris(tris_t tris, uint16_t texture_index) {
 
 	render_texture_t *t = &textures[texture_index];
 
+	// uvs are in original texels; the atlas holds the textures upscaled
 	for (int i = 0; i < 3; i++) {
-		tris.vertices[i].uv.x += t->offset.x;
-		tris.vertices[i].uv.y += t->offset.y;
+		tris.vertices[i].uv.x = tris.vertices[i].uv.x * texture_scale + t->offset.x;
+		tris.vertices[i].uv.y = tris.vertices[i].uv.y * texture_scale + t->offset.y;
 	}
 	if (!model_mat_is_identity) {
 		for (int i = 0; i < 3; i++) {
@@ -1719,8 +1764,38 @@ void render_push_2d_tile(vec2i_t pos, vec2i_t uv_offset, vec2i_t uv_size, vec2i_
 }
 
 
+void render_set_texture_upscale(bool xbr) {
+	texture_upscale_xbr = xbr;
+}
+
+// Upscaled copy of a texture (texture_scale x); NULL when no scaling is done
+static rgba_t *render_upscale_pixels(uint32_t tw, uint32_t th, rgba_t *pixels, bool xbr) {
+	if (texture_scale == 1 || !tw || !th) {
+		return NULL;
+	}
+	rgba_t *big = mem_temp_alloc(sizeof(rgba_t) * tw * th * texture_scale * texture_scale);
+	if (xbr) {
+		xbr2x(pixels, tw, th, big);
+	}
+	else {
+		nearest2x(pixels, tw, th, big);
+	}
+	return big;
+}
+
 uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	error_if(textures_len >= TEXTURES_MAX, "TEXTURES_MAX reached");
+
+	// Everything below works on the upscaled image; the texture's logical
+	// size (what the game sees) stays the original one
+	uint32_t orig_w = tw;
+	uint32_t orig_h = th;
+	rgba_t *big = render_upscale_pixels(tw, th, pixels, texture_upscale_xbr);
+	if (big) {
+		pixels = big;
+		tw *= texture_scale;
+		th *= texture_scale;
+	}
 
 	uint32_t bw = tw + ATLAS_BORDER * 2;
 	uint32_t bh = th + ATLAS_BORDER * 2;
@@ -1729,9 +1804,9 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	uint32_t grid_width = (bw + ATLAS_GRID - 1) / ATLAS_GRID;
 	uint32_t grid_height = (bh + ATLAS_GRID - 1) / ATLAS_GRID;
 	uint32_t grid_x = 0;
-	uint32_t grid_y = ATLAS_SIZE - grid_height + 1;
+	uint32_t grid_y = atlas_cells - grid_height + 1;
 
-	for (uint32_t cx = 0; cx < ATLAS_SIZE - grid_width; cx++) {
+	for (uint32_t cx = 0; cx < atlas_cells - grid_width; cx++) {
 		if (atlas_map[cx] >= grid_y) {
 			continue;
 		}
@@ -1755,7 +1830,7 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 		}
 	}
 
-	error_if(grid_y + grid_height > ATLAS_SIZE, "Render atlas ran out of space");
+	error_if(grid_y + grid_height > atlas_cells, "Render atlas ran out of space");
 
 	for (uint32_t cx = grid_x; cx < grid_x + grid_width; cx++) {
 		atlas_map[cx] = grid_y + grid_height;
@@ -1800,12 +1875,15 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, bw, bh, GL_RGBA, GL_UNSIGNED_BYTE, pb);
 	mem_temp_free(pb);
+	if (big) {
+		mem_temp_free(big);
+	}
 
 
 	texture_mipmap_is_dirty = RENDER_USE_MIPMAPS;
 	uint16_t texture_index = textures_len;
 	textures_len++;
-	textures[texture_index] = (render_texture_t){ {x + ATLAS_BORDER, y + ATLAS_BORDER}, {tw, th} };
+	textures[texture_index] = (render_texture_t){ {x + ATLAS_BORDER, y + ATLAS_BORDER}, {orig_w, orig_h} };
 #ifdef VERBOSE_PRINTING
 	printf("inserted atlas texture (%3dx%3d) at (%3d,%3d)\n", tw, th, grid_x, grid_y);
 #endif
@@ -1822,7 +1900,13 @@ void render_texture_replace_pixels(int16_t texture_index, rgba_t *pixels) {
 
 	render_texture_t *t = &textures[texture_index];
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, t->offset.x, t->offset.y, t->size.x, t->size.y, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+	// Per frame updates (the intro video): plain duplication, xBR is too slow
+	rgba_t *big = render_upscale_pixels(t->size.x, t->size.y, pixels, false);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, t->offset.x, t->offset.y, t->size.x * texture_scale, t->size.y * texture_scale, GL_RGBA, GL_UNSIGNED_BYTE, big ? big : pixels);
+	if (big) {
+		mem_temp_free(big);
+	}
 }
 
 uint16_t render_textures_len(void) {
@@ -1850,8 +1934,8 @@ void render_textures_reset(uint16_t len) {
 	for (int i = 0; i < textures_len; i++) {
 		uint32_t grid_x = (textures[i].offset.x - ATLAS_BORDER) / ATLAS_GRID;
 		uint32_t grid_y = (textures[i].offset.y - ATLAS_BORDER) / ATLAS_GRID;
-		uint32_t grid_width = (textures[i].size.x + ATLAS_BORDER * 2 + ATLAS_GRID - 1) / ATLAS_GRID;
-		uint32_t grid_height = (textures[i].size.y + ATLAS_BORDER * 2 + ATLAS_GRID - 1) / ATLAS_GRID;
+		uint32_t grid_width = (textures[i].size.x * texture_scale + ATLAS_BORDER * 2 + ATLAS_GRID - 1) / ATLAS_GRID;
+		uint32_t grid_height = (textures[i].size.y * texture_scale + ATLAS_BORDER * 2 + ATLAS_GRID - 1) / ATLAS_GRID;
 		for (uint32_t cx = grid_x; cx < grid_x + grid_width; cx++) {
 			atlas_map[cx] = grid_y + grid_height;
 		}
@@ -1859,8 +1943,8 @@ void render_textures_reset(uint16_t len) {
 }
 
 void render_textures_dump(const char *path) {
-	int width = ATLAS_SIZE * ATLAS_GRID;
-	int height = ATLAS_SIZE * ATLAS_GRID;
+	int width = atlas_cells * ATLAS_GRID;
+	int height = atlas_cells * ATLAS_GRID;
 	rgba_t *pixels = malloc(sizeof(rgba_t) * width * height);
 	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 	stbi_write_png(path, width, height, 4, pixels, 0);

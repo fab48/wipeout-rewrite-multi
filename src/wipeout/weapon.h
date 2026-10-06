@@ -2,6 +2,7 @@
 #define WEAPON_H
 
 #include "ship.h"
+#include "net_proto.h"
 
 #define WEAPONS_MAX 64
 
@@ -49,5 +50,10 @@ void weapons_fire_delayed(ship_t *ship, int weapon_type);
 void weapons_update(void);
 void weapons_draw(void);
 int weapon_get_random_type(int type_class);
+
+void weapons_explosion_fx(vec3_t pos, int particle_type, vec3_t base_velocity, vec3_t back);
+int weapons_net_export(net_weapon_state_t *out, int max_len);
+void weapons_net_import(const net_weapon_state_t *in, int num, float age);
+void weapons_update_client(void);
 
 #endif

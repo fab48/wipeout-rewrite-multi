@@ -19,11 +19,15 @@ typedef struct {
 	bool lighting; // PBR
 	float lighting_brightness; // multiplier
 	int point_lights; // 0..6
+	bool texture_smooth; // linear magnification instead of the pixelated PSX look
+	bool texture_upscale; // xBR 2x on all textures at load time
 
 	bool split_vertical;
 	bool swap_gamepads;
 	bool external_view;
 	int draw_distance; // 0..3: FULL, FAR, MEDIUM, NEAR
+
+	int net_pilot; // preferred pilot in LAN games
 
 	bool is_dirty;
 } settings_t;

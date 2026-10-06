@@ -74,6 +74,7 @@ else ifeq ($(shell uname -o), Msys)
 	endif
 
 	C_FLAGS := $(C_FLAGS) -DSDL_MAIN_HANDLED
+	L_FLAGS := $(L_FLAGS) -lws2_32
 	L_FLAGS_SDL := $(shell sdl2-config --libs)
 	L_FLAGS_SOKOL = --pthread -lgdi32 -lole32
 
@@ -121,6 +122,7 @@ COMMON_SRC = \
 	src/wipeout/particle.c \
 	src/wipeout/sfx.c \
 	src/wipeout/settings.c \
+	src/wipeout/xbr.c 	src/wipeout/net_proto.c 	src/wipeout/net_session.c 	src/wipeout/netplay.c 	src/net.c \
 	src/utils.c \
 	src/types.c \
 	src/system.c \
@@ -138,6 +140,22 @@ sdl: C_FLAGS += $(shell sdl2-config --cflags)
 sdl: $(BUILD_DIR)/src/platform_sdl.o
 sdl: $(COMMON_OBJ)
 	$(CC) $^ -o $(TARGET_NATIVE) $(L_FLAGS) $(L_FLAGS_SDL)
+
+# No window, no GPU, no sound: for the LAN soak tests (tests/lan_soak.py)
+HEADLESS_SRC = $(filter-out src/render_gl.c src/render_software.c, $(COMMON_SRC)) src/render_null.c src/platform_null.c
+HEADLESS_OBJ = $(patsubst %.c, build/obj/headless/%.o, $(HEADLESS_SRC))
+headless: $(HEADLESS_OBJ)
+	$(CC) $^ -o wipegame-headless $(filter-out -lglew32 -lopengl32 -lGLEW -lGL -lOpenGL, $(L_FLAGS)) $(if $(filter Msys,$(shell uname -o)),-lwinmm,)
+
+build/obj/headless/%.o: %.c
+	mkdir -p $(dir $@)
+	$(CC) $(filter-out -DRENDERER_GL, $(C_FLAGS)) -DRENDERER_NULL -MMD -MP -c $< -o $@
+
+# Protocol and session tests; no game data needed
+NET_TEST_SRC = tests/net_test.c src/wipeout/net_proto.c src/wipeout/net_session.c src/net.c
+NET_TEST_FLAGS ?=
+net_test: $(NET_TEST_SRC)
+	$(CC) -Isrc -std=gnu99 -Wall -O1 -g $(NET_TEST_FLAGS) $(NET_TEST_SRC) -o net-test -lm $(if $(filter Msys,$(shell uname -o)),-lws2_32,)
 
 sokol: $(BUILD_DIR)/src/platform_sokol.o
 sokol: $(COMMON_OBJ)
@@ -192,6 +210,6 @@ $(BUILD_DIR_WASM)/%.o: %.c
 
 
 
-.PHONY: clean
+.PHONY: clean headless net_test
 clean:
-	$(RM) -rf $(BUILD_DIR) $(BUILD_DIR_WASM) $(WASM_RELEASE_DIR)
+	$(RM) -rf $(BUILD_DIR) $(BUILD_DIR_WASM) $(WASM_RELEASE_DIR) build/obj/headless

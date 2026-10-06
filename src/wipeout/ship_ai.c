@@ -6,6 +6,7 @@
 #include "weapon.h"
 #include "ship_ai.h"
 #include "game.h"
+#include "netplay.h"
 
 vec3_t ship_ai_strat_hold_center(ship_t *self, track_face_t *face);
 vec3_t ship_ai_strat_hold_right(ship_t *self, track_face_t *face);
@@ -14,6 +15,29 @@ vec3_t ship_ai_strat_block(ship_t *self, track_face_t *face);
 vec3_t ship_ai_strat_avoid(ship_t *self, track_face_t *face);
 vec3_t ship_ai_strat_avoid_other(ship_t *self, track_face_t *face);
 vec3_t ship_ai_strat_zig_zag(ship_t *self, track_face_t *face);
+
+// The human this AI ship races against: the closest one on the track. In a
+// single player game that's always the player. A human's own ship (on
+// autopilot after the finish) refers to itself.
+static ship_t *ship_ai_human(ship_t *self) {
+	if (ship_is_player(self)) {
+		return self;
+	}
+	ship_t *best = &g.ships[g.pilot];
+	int best_distance = abs(self->total_section_num - best->total_section_num);
+	for (int i = 0; i < len(g.ships); i++) {
+		ship_t *other = &g.ships[i];
+		if (!ship_is_player(other) || flags_not(other->flags, SHIP_RACING)) {
+			continue;
+		}
+		int distance = abs(self->total_section_num - other->total_section_num);
+		if (distance < best_distance) {
+			best = other;
+			best_distance = distance;
+		}
+	}
+	return best;
+}
 
 void ship_ai_update_intro(ship_t *self) {
 	self->temp_target = self->position;
@@ -52,7 +76,7 @@ vec3_t ship_ai_strat_hold_center(ship_t *self, track_face_t *face) {
 }
 
 vec3_t ship_ai_strat_block(ship_t *self, track_face_t *face) {
-	if (flags_is(g.ships[g.pilot].flags, SHIP_LEFT_SIDE)) {
+	if (flags_is(ship_ai_human(self)->flags, SHIP_LEFT_SIDE)) {
 		return ship_ai_strat_hold_left(self, face);
 	}
 	else {
@@ -62,7 +86,7 @@ vec3_t ship_ai_strat_block(ship_t *self, track_face_t *face) {
 }
 
 vec3_t ship_ai_strat_avoid(ship_t *self, track_face_t *face) {
-	if (flags_is(g.ships[g.pilot].flags, SHIP_LEFT_SIDE)) {
+	if (flags_is(ship_ai_human(self)->flags, SHIP_LEFT_SIDE)) {
 		return ship_ai_strat_hold_right(self, face);
 	}
 	else {
@@ -113,7 +137,7 @@ vec3_t ship_ai_strat_zig_zag(ship_t *self, track_face_t *face) {
 void ship_ai_update_race(ship_t *self) {
 	vec3_t offset_vector = vec3(0, 0, 0);
 
-	ship_t *player = &(g.ships[g.pilot]);
+	ship_t *player = ship_ai_human(self);
 
 	if (self->ebolt_timer > 0) {
 		self->ebolt_timer -= system_tick();
@@ -188,7 +212,7 @@ void ship_ai_update_race(ship_t *self) {
 						else if ((chance >= 40) && (chance < 52)) {	// Ship will attempt to drop mines in your path
 							self->update_strat_func = ship_ai_strat_block;
 							if (flags_not(self->flags, SHIP_SHIELDED) && flags_is(self->flags, SHIP_RACING)) {
-								sfx_play(SFX_VOICE_MINES);
+								netplay_sfx_play_for(player, SFX_VOICE_MINES, 0);
 								self->weapon_type = WEAPON_TYPE_MINE;
 								weapons_fire_delayed(self, self->weapon_type);
 							}
@@ -247,18 +271,18 @@ void ship_ai_update_race(ship_t *self) {
 								
 								if (flags_not(self->flags, SHIP_SHIELDED) && flags_is(self->flags, SHIP_RACING)) {
 									if (chance < 54) {
-										sfx_play(SFX_VOICE_ROCKETS);
+										netplay_sfx_play_for(player, SFX_VOICE_ROCKETS, 0);
 										self->weapon_type = WEAPON_TYPE_ROCKET;
 									}
 									else if (chance < 60) {
-										sfx_play(SFX_VOICE_MISSILE);
+										netplay_sfx_play_for(player, SFX_VOICE_MISSILE, 0);
 										self->weapon_type = WEAPON_TYPE_MISSILE;
-										self->weapon_target = &g.ships[g.pilot];
+										self->weapon_target = player;
 									}
 									else {
-										sfx_play(SFX_VOICE_SHOCKWAVE);
+										netplay_sfx_play_for(player, SFX_VOICE_SHOCKWAVE, 0);
 										self->weapon_type = WEAPON_TYPE_EBOLT;
-										self->weapon_target = &g.ships[g.pilot];
+										self->weapon_target = player;
 									}
 									weapons_fire_delayed(self, self->weapon_type);
 								}

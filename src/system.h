@@ -7,6 +7,11 @@
 #define SYSTEM_WINDOW_WIDTH 1280
 #define SYSTEM_WINDOW_HEIGHT 720
 
+// Command line, set by the platform before system_init()
+void system_set_args(int argc, char **argv);
+int system_argc(void);
+char **system_argv(void);
+
 void system_init(void);
 void system_update(void);
 void system_cleanup(void);

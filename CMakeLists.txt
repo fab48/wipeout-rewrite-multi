@@ -76,6 +76,14 @@ set(common_src
 	src/wipeout/scene.h
 	src/wipeout/sfx.c
 	src/wipeout/settings.c
+	src/wipeout/xbr.c
+	src/wipeout/xbr.h
+	src/wipeout/net_proto.c
+	src/wipeout/net_proto.h
+	src/wipeout/net_session.c
+	src/wipeout/net_session.h
+	src/wipeout/netplay.c
+	src/wipeout/netplay.h
 	src/wipeout/sfx.h
 	src/wipeout/ship.c
 	src/wipeout/ship.h
@@ -93,6 +101,8 @@ set(common_src
 	src/wipeout/weapon.h
 	src/input.c
 	src/input.h
+	src/net.c
+	src/net.h
 	src/mem.c
 	src/mem.h
 	src/platform.h
@@ -127,6 +137,7 @@ if(WIN32)
 		"_USE_MATH_DEFINES"
 		"_CRT_SECURE_NO_WARNINGS"
 	)
+	target_link_libraries(wipeout PUBLIC ws2_32)
 elseif(APPLE)
 	target_compile_definitions(wipeout PRIVATE
 		"_THREAD_SAFE"

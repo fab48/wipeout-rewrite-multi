@@ -2,6 +2,7 @@
 #include "../mem.h"
 #include "../platform.h"
 
+#include "netplay.h"
 #include "sfx.h"
 #include "game.h"
 
@@ -193,6 +194,9 @@ sfx_t *sfx_play(sfx_source_t source_index) {
 }
 
 sfx_t *sfx_play_at(sfx_source_t source_index, vec3_t pos, vec3_t vel, float volume) {
+	if (netplay_is_host()) {
+		netplay_event_sfx_at(source_index, pos, volume);
+	}
 	sfx_t *sfx = sfx_get_node(source_index);
 	sfx_set_position(sfx, pos, vel, volume);
 	if (sfx->volume > 0) {

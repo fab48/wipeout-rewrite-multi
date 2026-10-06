@@ -71,6 +71,16 @@ render_post_effect_t render_get_post_effect(void); // the effective one (may dif
 
 // Multipliers for the effects, 1.0 = default
 void render_set_post_params(float bloom_intensity, float motion_blur_strength, float lighting_brightness);
+
+// Magnification filter of the texture atlas: smooth (linear) or the sharp,
+// pixelated PSX look. Text and icons are always drawn sharp.
+void render_set_texture_smooth(bool smooth);
+void render_set_sharp_pixels(bool sharp); // nestable; used around text drawing
+
+// Textures are stored upscaled 2x in the atlas (when the GPU allows a 4096
+// atlas). With upscale on they go through xBR, otherwise plain duplication.
+// Applies to textures created afterwards.
+void render_set_texture_upscale(bool xbr);
 vec2i_t render_size(void);
 
 // Restrict all drawing to a part of the screen (for split screen). pos is the

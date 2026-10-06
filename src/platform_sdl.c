@@ -541,6 +541,7 @@ int main(int argc, char *argv[]) {
 	);
 
 	platform_video_init();
+	system_set_args(argc, argv);
 	system_init();
 
 	while (!wants_to_exit) {

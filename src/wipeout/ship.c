@@ -14,6 +14,7 @@
 #include "race.h"
 #include "sfx.h"
 #include "particle.h"
+#include "netplay.h"
 
 #define EXHAUST_FLARE_TEXTURE_SIZE 128
 
@@ -143,9 +144,25 @@ void ships_init(section_t *section) {
 	}
 
 	// player is always last
-	for (int i = 0; i < len(ranks_to_pilots)-1; i++) {
-		if (ranks_to_pilots[i] == g.pilot) {
-			swap(ranks_to_pilots[i], ranks_to_pilots[i+1]);
+	if (netplay_active()) {
+		// LAN game: all the humans start at the back, the AI ships in front
+		int ordered[NUM_PILOTS];
+		int num = 0;
+		for (int pass = 0; pass < 2; pass++) {
+			for (int i = 0; i < len(ranks_to_pilots); i++) {
+				bool human = netplay_player_for_pilot(ranks_to_pilots[i]) >= 0;
+				if (human == (pass == 1)) {
+					ordered[num++] = ranks_to_pilots[i];
+				}
+			}
+		}
+		memcpy(ranks_to_pilots, ordered, sizeof(ordered));
+	}
+	else {
+		for (int i = 0; i < len(ranks_to_pilots)-1; i++) {
+			if (ranks_to_pilots[i] == g.pilot) {
+				swap(ranks_to_pilots[i], ranks_to_pilots[i+1]);
+			}
 		}
 	}
 
@@ -227,9 +244,10 @@ void ships_update(void) {
 			}
 		}
 
+		// Ranks are kept up to date as long as any human is still racing
 		bool is_racing = false;
-		for (int p = 0; p < g.num_players; p++) {
-			if (flags_is(game_player_ship(p)->flags, SHIP_RACING)) {
+		for (int i = 0; i < len(g.ships); i++) {
+			if (ship_is_player(&g.ships[i]) && flags_is(g.ships[i].flags, SHIP_RACING)) {
 				is_racing = true;
 			}
 		}
@@ -370,7 +388,10 @@ void ship_init(ship_t *self, section_t *section, int pilot, int inv_start_rank) 
 	self->position_rank = NUM_PILOTS - inv_start_rank;
 
 	self->player = -1;
-	if (pilot == g.pilot) {
+	if (netplay_active()) {
+		self->player = netplay_player_for_pilot(pilot);
+	}
+	else if (pilot == g.pilot) {
 		self->player = 0;
 	}
 	else if (g.num_players > 1 && pilot == g.pilot2) {
@@ -804,6 +825,41 @@ void ship_draw_shadow(ship_t *self) {
 	}
 }
 
+// Exhaust plume animation, the ship's matrix and the exhaust trail. Also run
+// by LAN clients for the ships they get from the host.
+void ship_update_cosmetics(ship_t *self) {
+	int exhaust_len;
+
+	if (ship_is_player(self)) {
+		// get the z exhaust_len related to speed or thrust
+		exhaust_len = self->thrust_mag * 0.0625;
+		exhaust_len += self->speed * 0.00390625;
+	}
+	else {
+		// for remote ships the z exhaust_len is a constant
+		exhaust_len = 150;
+	}
+
+	if (self->turbo_timer > 0) {
+		exhaust_len *= 1.8;
+	}
+
+	for (int i = 0; i < 3; i++) {
+		self->exhaust_len = exhaust_len;
+		if (self->exhaust_plume[i].v) {
+			vec3_t jitter = vec3_rand(7);
+			jitter.z *= 4;
+			*self->exhaust_plume[i].v = vec3_add(self->exhaust_plume[i].initial, jitter);
+			self->exhaust_plume[i].v->z -= exhaust_len;
+		}
+	}
+
+	mat4_set_translation(&self->mat, self->position);
+	mat4_set_yaw_pitch_roll(&self->mat, self->angle);
+
+	ship_update_exhaust_trail(self);
+}
+
 void ship_update(ship_t *self) {
 	self->prev_section = self->section;
 
@@ -852,7 +908,7 @@ void ship_update(ship_t *self) {
 		track_collect_pickups(face)
 	) {
 		if (ship_is_player(self)) {
-			sfx_play(SFX_POWERUP);
+			netplay_sfx_play_for(self, SFX_POWERUP, 0);
 			if (flags_is(self->flags, SHIP_SHIELDED)) {
 				self->weapon_type = weapon_get_random_type(WEAPON_CLASS_PROJECTILE);
 			}
@@ -870,44 +926,11 @@ void ship_update(ship_t *self) {
 	// Call the active player/ai update function
 	(self->update_func)(self);
 
-
-	// Animate the exhaust plume
-
-	int exhaust_len;
-
-	if (ship_is_player(self)) {
-		// get the z exhaust_len related to speed or thrust
-		exhaust_len = self->thrust_mag * 0.0625;
-		exhaust_len += self->speed * 0.00390625;
-	}
-	else {
-		// for remote ships the z exhaust_len is a constant
-		exhaust_len = 150;
-	}
-
-	if (self->turbo_timer > 0) {
-		exhaust_len *= 1.8;
-	}
-
-	for (int i = 0; i < 3; i++) {
-		self->exhaust_len = exhaust_len;
-		if (self->exhaust_plume[i].v) {
-			vec3_t jitter = vec3_rand(7);
-			jitter.z *= 4;
-			*self->exhaust_plume[i].v = vec3_add(self->exhaust_plume[i].initial, jitter);
-			self->exhaust_plume[i].v->z -= exhaust_len;
-		}
-	}
-
-	mat4_set_translation(&self->mat, self->position);
-	mat4_set_yaw_pitch_roll(&self->mat, self->angle);
-
-	ship_update_exhaust_trail(self);
-
+	ship_update_cosmetics(self);
 
 
 	// Race position and lap times
-	
+
 	self->lap_time += system_tick();
 
 	int start_line_pos = def.circuits[g.circuit].settings[g.race_class].start_line_pos;
@@ -982,6 +1005,9 @@ static bool vec3_is_on_face(vec3_t pos, track_face_t *face, float alpha) {
 // Sparks flying off an impact point. strength 0..1 scales the amount and the
 // spread; a hard hit adds fire and a flash of light.
 void ship_spawn_impact_sparks(ship_t *self, vec3_t pos, vec3_t normal, float strength) {
+	if (netplay_is_host()) {
+		netplay_event_sparks(self, pos, normal, strength);
+	}
 	strength = clamp(strength, 0.0, 1.0);
 	int count = 4 + (int)(strength * 22);
 	vec3_t base = vec3_mulf(normal, 400 + 900 * strength);

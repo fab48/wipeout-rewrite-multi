@@ -1,0 +1,35 @@
+# LAN protocol and session tests. They need no game data.
+name: net-tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (with address and undefined behaviour sanitizers)
+        run: make net_test NET_TEST_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+      - name: Run
+        run: ./net-test
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            make
+      - name: Build
+        run: make net_test
+      - name: Run
+        run: ./net-test.exe

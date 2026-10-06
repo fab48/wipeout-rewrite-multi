@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "image.h"
 #include "ui.h"
+#include "netplay.h"
 
 static void page_main_init(menu_t *menu);
 static void page_options_init(menu_t *menu);
@@ -24,6 +25,8 @@ static void page_options_controls_init(menu_t *menu);
 static void page_options_video_init(menu_t *menu);
 static void page_options_audio_init(menu_t *menu);
 static void page_options_highscores_init(menu_t *menu);
+static void page_lan_init(menu_t *menu);
+static void page_lan_lobby_init(menu_t *menu);
 
 static uint16_t background;
 static texture_list_t track_images;
@@ -84,7 +87,16 @@ static void page_main_draw(menu_t *menu, int data) {
 			draw_model(g.ships[0].model, vec2(-0.2, -0.1), vec3(0, 0, -900), system_cycle_time());
 			draw_model(g.ships[2].model, vec2( 0.2, -0.1), vec3(0, 0, -900), system_cycle_time() + 2.0);
 			break;
+		case 4:
+			draw_model(g.ships[1].model, vec2(-0.3, -0.1), vec3(0, 0, -1100), system_cycle_time());
+			draw_model(g.ships[4].model, vec2( 0.0, -0.15), vec3(0, 0, -1100), system_cycle_time() + 1.0);
+			draw_model(g.ships[6].model, vec2( 0.3, -0.1), vec3(0, 0, -1100), system_cycle_time() + 2.0);
+			break;
 	}
+}
+
+static void button_lan(menu_t *menu, int data) {
+	page_lan_init(menu);
 }
 
 static void button_two_players(menu_t *menu, int data) {
@@ -105,6 +117,9 @@ static void page_main_init(menu_t *menu) {
 
 	menu_page_add_button(page, 0, "START GAME", button_start_game);
 	menu_page_add_button(page, 3, "TWO PLAYERS", button_two_players);
+	#ifndef __EMSCRIPTEN__
+		menu_page_add_button(page, 4, "LAN GAME", button_lan);
+	#endif
 	menu_page_add_button(page, 1, "OPTIONS", button_options);
 
 	#ifndef __EMSCRIPTEN__
@@ -394,6 +409,10 @@ SETTINGS_TOGGLE(toggle_lighting, lighting)
 SETTINGS_TOGGLE(toggle_split, split_vertical)
 SETTINGS_TOGGLE(toggle_default_view, external_view)
 SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
+SETTINGS_TOGGLE(toggle_texture_smooth, texture_smooth)
+SETTINGS_TOGGLE(toggle_texture_upscale, texture_upscale)
+
+static const char *opts_texture_filter[] = {"SHARP", "SMOOTH"};
 
 static const char *opts_bloom_threshold[] = {"DEFAULT", "LOW", "LOWER", "HIGH"};
 static const char *opts_split[] = {"HORIZONTAL", "VERTICAL"};
@@ -478,6 +497,8 @@ static void page_options_effects_init(menu_t *menu) {
 	menu_page_add_toggle(page, settings.lighting, "PBR LIGHTING", opts_off_on, len(opts_off_on), toggle_lighting);
 	menu_page_add_toggle(page, percent_index(settings.lighting_brightness), "LIGHTING BRIGHTNESS", opts_percent, len(opts_percent), toggle_lighting_brightness);
 	menu_page_add_toggle(page, point_lights_option_index(), "POINT LIGHTS", opts_point_lights, len(opts_point_lights), toggle_point_lights);
+	menu_page_add_toggle(page, settings.texture_smooth, "TEXTURE FILTER", opts_texture_filter, len(opts_texture_filter), toggle_texture_smooth);
+	menu_page_add_toggle(page, settings.texture_upscale, "XBR UPSCALE (RESTART)", opts_off_on, len(opts_off_on), toggle_texture_upscale);
 }
 
 static void button_effects(menu_t *menu, int data) {
@@ -948,6 +969,15 @@ void main_menu_init(void) {
 	menu_reset(main_menu);
 	page_main_init(main_menu);
 
+	// Coming back from a LAN race (or thrown out of one): straight to the lobby
+	if (netplay_active() || netplay_take_return_to_lan()) {
+		main_menu->pages[0].index = 2; // the LAN GAME entry
+		page_lan_init(main_menu);
+		if (netplay_active()) {
+			page_lan_lobby_init(main_menu);
+		}
+	}
+
 	// Coming back from a two player race: straight to the two player setup
 	if (g.return_to_two_players) {
 		g.return_to_two_players = false;
@@ -979,5 +1009,244 @@ void main_menu_update(void) {
 	render_push_2d(vec2i(0, 0), render_size(), rgba(128, 128, 128, 255), background);
 
 	menu_update(main_menu);
+
+	// Tell the players who has the hand, and how
+	if (filter == 0) {
+		ui_draw_text_centered("PLAYER 1: GAMEPAD 1 OR KEYBOARD ARROWS", ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
+	else if (filter == 1) {
+		ui_draw_text_centered("PLAYER 2: GAMEPAD 2 OR KEYS I J K L, N TO SELECT", ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
 }
 
+
+
+
+// -----------------------------------------------------------------------------
+// LAN game
+
+static const char *lan_pilot_names[NUM_PILOTS];
+static const char *lan_class_names[NUM_RACE_CLASSES];
+static const char *lan_circuit_names[NUM_WIPEOUT_CIRCUITS];
+static int lan_circuit_ids[NUM_WIPEOUT_CIRCUITS];
+static int lan_circuits_len;
+static char lan_host_labels[NET_MAX_FOUND_HOSTS][48];
+
+static void lan_names_init(void) {
+	for (int i = 0; i < NUM_PILOTS; i++) {
+		lan_pilot_names[i] = def.pilots[i].name;
+	}
+	for (int i = 0; i < NUM_RACE_CLASSES; i++) {
+		lan_class_names[i] = def.race_classes[i].name;
+	}
+	lan_circuits_len = 0;
+	for (int i = 0; i < NUM_WIPEOUT_CIRCUITS; i++) {
+		if (g.installed_circuits[i]) {
+			lan_circuit_names[lan_circuits_len] = def.circuits[i].name;
+			lan_circuit_ids[lan_circuits_len] = i;
+			lan_circuits_len++;
+		}
+	}
+}
+
+static int lan_circuit_index(int circuit) {
+	for (int i = 0; i < lan_circuits_len; i++) {
+		if (lan_circuit_ids[i] == circuit) {
+			return i;
+		}
+	}
+	return 0;
+}
+
+static void toggle_lan_pilot(menu_t *menu, int data) {
+	netplay_set_pilot(data);
+}
+
+static void button_lan_join_host(menu_t *menu, int data) {
+	if (data < 0 || data >= net.found_len) {
+		return;
+	}
+	if (netplay_join(net.found[data].addr)) {
+		page_lan_lobby_init(menu);
+	}
+}
+
+static void page_lan_join_draw(menu_t *menu, int data) {
+	menu_page_t *page = &menu->pages[menu->index];
+
+	if (net.role != NET_ROLE_DISCOVER) {
+		menu_pop(menu);
+		return;
+	}
+
+	// The list of hosts changes while we look at it
+	page->entries_len = 0;
+	for (int i = 0; i < net.found_len && i < NET_MAX_FOUND_HOSTS; i++) {
+		net_msg_host_info_t *info = &net.found[i].info;
+		snprintf(lan_host_labels[i], sizeof(lan_host_labels[i]), "%s  %d OF %d%s",
+			info->name[0] ? info->name : "HOST", info->num_players, info->max_players,
+			info->phase == NET_PHASE_LOBBY ? "" : "  RACING"
+		);
+		menu_page_add_button(page, i, lan_host_labels[i], button_lan_join_host);
+	}
+	if (page->index >= page->entries_len) {
+		page->index = 0;
+	}
+
+	if (page->entries_len == 0) {
+		ui_draw_text_centered("SEARCHING THE LOCAL NETWORK", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(0, 0)), UI_SIZE_8, blink() ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT);
+		ui_draw_text_centered("NOTHING FOUND? START WITH --JOIN AND THE IP", ui_scaled_pos(UI_POS_MIDDLE | UI_POS_CENTER, vec2i(0, 24)), UI_SIZE_8, UI_COLOR_DEFAULT);
+	}
+}
+
+static void button_lan_host(menu_t *menu, int data) {
+	if (netplay_host_session()) {
+		page_lan_lobby_init(menu);
+	}
+}
+
+static void button_lan_join(menu_t *menu, int data) {
+	if (!netplay_discover()) {
+		return;
+	}
+	menu_page_t *page = menu_push(menu, "JOIN A LAN GAME", page_lan_join_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	page->items_pos = vec2i(0, -40);
+	page->items_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+}
+
+static void page_lan_draw(menu_t *menu, int data) {
+	// Back here from the lobby or the host list: that session is over
+	if (net.role != NET_ROLE_NONE) {
+		netplay_leave(NULL);
+	}
+
+	draw_model(g.ships[settings.net_pilot % NUM_PILOTS].model, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time());
+
+	const char *status = netplay_status_text();
+	if (status[0]) {
+		ui_draw_text_centered(status, ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -40)), UI_SIZE_8, UI_COLOR_ACCENT);
+	}
+}
+
+static void page_lan_init(menu_t *menu) {
+	lan_names_init();
+	menu_page_t *page = menu_push(menu, "LAN GAME", page_lan_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	page->items_pos = vec2i(-130, -110);
+	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
+	page->block_width = 260;
+	flags_rm(page->layout_flags, MENU_ALIGN_CENTER);
+
+	menu_page_add_button(page, 0, "HOST A GAME", button_lan_host);
+	menu_page_add_button(page, 0, "JOIN A GAME", button_lan_join);
+	menu_page_add_toggle(page, settings.net_pilot % NUM_PILOTS, "PILOT", lan_pilot_names, len(lan_pilot_names), toggle_lan_pilot);
+}
+
+static void toggle_lan_class(menu_t *menu, int data) {
+	net_session_host_set_race(&net, data, net.circuit);
+}
+
+static void toggle_lan_circuit(menu_t *menu, int data) {
+	net_session_host_set_race(&net, net.race_class, lan_circuit_ids[data]);
+}
+
+static void button_lan_start(menu_t *menu, int data) {
+	netplay_host_start_race();
+}
+
+static void page_lan_lobby_draw(menu_t *menu, int data) {
+	if (!netplay_active()) {
+		menu_pop(menu);
+		return;
+	}
+	menu_page_t *page = &menu->pages[menu->index];
+	ui_pos_t anchor = UI_POS_TOP | UI_POS_CENTER;
+
+	if (net.role == NET_ROLE_CLIENT && net.status != NET_STATUS_OK) {
+		ui_draw_text_centered("CONNECTING", ui_scaled_pos(anchor, vec2i(0, 70)), UI_SIZE_8, blink() ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT);
+		return;
+	}
+
+	// The toggles show what the host decided, which may differ from the wish
+	for (int i = 0; i < page->entries_len; i++) {
+		menu_entry_t *entry = &page->entries[i];
+		if (entry->select_func == toggle_lan_pilot && net.my_slot >= 0) {
+			entry->data = net.slots[net.my_slot].pilot % NUM_PILOTS;
+		}
+		else if (entry->select_func == toggle_lan_class) {
+			entry->data = net.race_class % NUM_RACE_CLASSES;
+		}
+		else if (entry->select_func == toggle_lan_circuit) {
+			entry->data = lan_circuit_index(net.circuit);
+		}
+	}
+
+	char line[64];
+	snprintf(line, sizeof(line), "%s  %s",
+		def.race_classes[net.race_class % NUM_RACE_CLASSES].name,
+		def.circuits[net.circuit % NUM_CIRCUITS].name
+	);
+	ui_draw_text_centered(line, ui_scaled_pos(anchor, vec2i(0, 52)), UI_SIZE_8, UI_COLOR_DEFAULT);
+
+	vec2i_t pos = vec2i(-150, 72);
+	ui_draw_text("PLAYER", ui_scaled_pos(anchor, pos), UI_SIZE_8, UI_COLOR_ACCENT);
+	ui_draw_text("PILOT", ui_scaled_pos(anchor, vec2i(pos.x + 110, pos.y)), UI_SIZE_8, UI_COLOR_ACCENT);
+	ui_draw_text("PING", ui_scaled_pos(anchor, vec2i(pos.x + 262, pos.y)), UI_SIZE_8, UI_COLOR_ACCENT);
+	pos.y += 14;
+
+	int players = 0;
+	for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+		net_slot_t *slot = &net.slots[i];
+		if (!slot->used) {
+			continue;
+		}
+		players++;
+		rgba_t color = i == net.my_slot ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT;
+		vec2i_t ping_pos = vec2i(pos.x + 262, pos.y);
+		ui_draw_text(slot->name[0] ? slot->name : "PLAYER", ui_scaled_pos(anchor, pos), UI_SIZE_8, color);
+		ui_draw_text(def.pilots[slot->pilot % NUM_PILOTS].name, ui_scaled_pos(anchor, vec2i(pos.x + 110, pos.y)), UI_SIZE_8, color);
+		if (i == 0) {
+			ui_draw_text("HOST", ui_scaled_pos(anchor, ping_pos), UI_SIZE_8, color);
+		}
+		else if (!slot->connected) {
+			ui_draw_text("LOST", ui_scaled_pos(anchor, ping_pos), UI_SIZE_8, color);
+		}
+		else {
+			ui_draw_number(slot->ping_ms, ui_scaled_pos(anchor, ping_pos), UI_SIZE_8, color);
+		}
+		pos.y += 12;
+	}
+
+	snprintf(line, sizeof(line), "%d OF %d PLAYERS%s", players, NET_MAX_PLAYERS, players < NET_MAX_PLAYERS ? "  THE REST ARE CPU" : "");
+	ui_draw_text_centered(line, ui_scaled_pos(anchor, vec2i(0, pos.y + 6)), UI_SIZE_8, UI_COLOR_DEFAULT);
+
+	if (net.role == NET_ROLE_CLIENT) {
+		ui_draw_text_centered("WAITING FOR THE HOST TO START", ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -40)), UI_SIZE_8, blink() ? UI_COLOR_ACCENT : UI_COLOR_DEFAULT);
+	}
+}
+
+static void page_lan_lobby_init(menu_t *menu) {
+	lan_names_init();
+	menu_page_t *page = menu_push(menu, "LAN LOBBY", page_lan_lobby_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	page->items_pos = vec2i(-130, -90);
+	page->items_anchor = UI_POS_BOTTOM | UI_POS_CENTER;
+	page->block_width = 260;
+	flags_rm(page->layout_flags, MENU_ALIGN_CENTER);
+
+	if (netplay_is_host()) {
+		menu_page_add_button(page, 0, "START RACE", button_lan_start);
+		menu_page_add_toggle(page, net.race_class % NUM_RACE_CLASSES, "CLASS", lan_class_names, NUM_RACE_CLASSES, toggle_lan_class);
+		if (lan_circuits_len > 0) {
+			menu_page_add_toggle(page, lan_circuit_index(net.circuit), "CIRCUIT", lan_circuit_names, lan_circuits_len, toggle_lan_circuit);
+		}
+	}
+	menu_page_add_toggle(page, settings.net_pilot % NUM_PILOTS, "PILOT", lan_pilot_names, len(lan_pilot_names), toggle_lan_pilot);
+}

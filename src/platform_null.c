@@ -2,17 +2,40 @@
 #include "system.h"
 #include "utils.h"
 #include "mem.h"
+#include "net.h"
+
+#if defined(_WIN32)
+	#include <windows.h>
+#else
+	#include <time.h>
+#endif
 
 static char *path_assets = "";		// optionally set by -DPATH_ASSETS
 static char *path_userdata = "";	// optionally set by -DPATH_USERDATA
 static char *temp_path = NULL;		// buffer alloc'd in main()
+static bool wants_to_exit = false;
+static double start_time = 0;
 
-void platform_exit(void) {}
+// Headless: no window, no sound, no input. With --headless-loop the game runs
+// until it quits by itself (LAN soak tests with --bot), at ~60 updates/s.
+
+void platform_exit(void) {
+	wants_to_exit = true;
+}
 vec2i_t platform_screen_size(void) {
 	return vec2i(0, 0);
 }
 double platform_now(void) {
-	return 0.0;
+	return net_time() - start_time;
+}
+
+static void platform_sleep_ms(int ms) {
+	#if defined(_WIN32)
+		Sleep(ms);
+	#else
+		struct timespec ts = {.tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000};
+		nanosleep(&ts, NULL);
+	#endif
 }
 bool platform_get_fullscreen(void) {
 	return false;
@@ -50,7 +73,14 @@ uint32_t platform_store_userdata(const char *name, void *bytes, int32_t len) {
 }
 
 int main(int argc, char *argv[]) {
-	(void) argc; (void) argv;
+	start_time = net_time();
+	bool loop = false;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--headless-loop") == 0) {
+			loop = true;
+		}
+	}
+	setvbuf(stdout, NULL, _IONBF, 0);
 	// Figure out the absolute asset and userdata paths. These may either be
 	// supplied at build time through -DPATH_ASSETS=.. and -DPATH_USERDATA=..
 	// We fall back to the current directory (i.e. just "") in this case.
@@ -98,8 +128,26 @@ int main(int argc, char *argv[]) {
 	// load: wipeout/common/shld.prm
 	// load: wipeout/common/ebolt.prm
 	// open music track 1
+	system_set_args(argc, argv);
 	system_init();
 	system_update();
+	if (loop) {
+		#if defined(_WIN32)
+			timeBeginPeriod(1);
+		#endif
+		double next = platform_now();
+		while (!wants_to_exit) {
+			system_update();
+			next += 1.0 / 60.0;
+			double wait = next - platform_now();
+			if (wait > 0.001) {
+				platform_sleep_ms((int)(wait * 1000));
+			}
+			else if (wait < -0.25) {
+				next = platform_now(); // fell behind (loading): don't race to catch up
+			}
+		}
+	}
 	system_cleanup();
 
 	return 0;

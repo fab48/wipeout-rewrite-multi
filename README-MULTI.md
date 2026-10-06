@@ -40,6 +40,45 @@ Binaries for Linux, Windows and macOS are built by GitHub Actions for every
   keyboard I/K/J/L, N thrust, B fire, `,`/`.` brakes, O view; second gamepad
   (SDL build). **SWAP GAMEPADS** exchanges the two pads.
 
+## LAN game (up to 8 players)
+
+- Main menu > **LAN GAME**: pick your pilot, then **HOST A GAME** or
+  **JOIN A GAME** (hosts on the local network are found automatically).
+  In the lobby the host chooses class and circuit and starts the race; free
+  places are taken by CPU ships. Every player needs the same game data.
+- The host runs the race (physics, AI, weapons, pickups, rescue droids) and
+  sends 60 snapshots per second; the other machines only send their input and
+  show what the host sends, extrapolated and smoothed. Sounds, explosions,
+  sparks and camera shakes are sent as events, repeated in the following
+  snapshots so that a lost packet loses nothing. Button presses travel as
+  counters, so a press is never lost either.
+- The race ends when all humans have finished, or 45 s after the first one.
+  Then the results, and the host takes everybody back to the lobby.
+- Somebody who drops out (8 s without a packet) leaves their ship on
+  autopilot; the race goes on. Joining is only possible in the lobby.
+- START during a race opens a menu, but the race doesn't stop.
+- UDP port **47800** (host). Allow the game in the firewall on the host.
+  If the automatic search finds nothing (broadcast blocked, other subnet),
+  start the client with `--join 192.168.1.20`, or put `join = 192.168.1.20`
+  in `lan.txt` next to `save.dat`. `lan.txt` also takes `name = FAB` and
+  `port = 47800`.
+- About 50 KB/s from the host to each client: ~3 Mbit/s for 8 players. A
+  wired LAN is best; Wi-Fi works.
+- Own ship latency on the clients: one round trip plus up to two frames
+  (~30-50 ms on a LAN). There is no client side prediction yet.
+
+Tests (no game data needed for the first one):
+
+    make net_test && ./net-test                       # protocol, fuzzing, sessions
+    make headless
+    python tests/lan_soak.py --data path/to/wipeout --players 8 --races 2
+    python tests/lan_soak.py --data path/to/wipeout --players 8 --loss 0.05
+
+`lan_soak.py` runs one host and seven clients of the real game, headless, on
+this machine, all ships driven by an autopilot (`--bot`), and checks that
+every race starts and ends for everybody, that every remote ship drives laps
+and that the snapshot stream is healthy.
+
 ## Options
 
 - Video: draw distance (FULL/FAR/MEDIUM/NEAR), default view (internal /
