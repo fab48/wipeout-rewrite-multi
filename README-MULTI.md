@@ -99,5 +99,10 @@ For old machines: PBR lighting off, point lights low, draw distance MEDIUM,
 
     make sdl USER_CFLAGS="-march=native"
 
+Release builds use `make sdl GLEW_STATIC=true`: GLEW is linked into the
+binary, so the Linux release runs on any distro whatever GLEW version it
+ships (Mint/Ubuntu 2.2, Arch/Manjaro 2.3) or none. Only SDL2 is needed
+at runtime (`libsdl2-2.0-0`, usually already installed).
+
 Player 2 gamepad and swap only exist in the SDL build; the web build has no
 gamepad support at all.

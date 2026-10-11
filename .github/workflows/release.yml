@@ -21,8 +21,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libglew-dev
-      - name: Build (SDL2, OpenGL)
-        run: make sdl
+      - name: Build (SDL2, OpenGL, GLEW linked statically)
+        run: make sdl GLEW_STATIC=true
+      - name: Check the binary does not need libGLEW
+        run: |
+          ldd wipegame
+          if ldd wipegame | grep -qi glew; then echo "libGLEW is still a runtime dependency"; exit 1; fi
       - name: Package
         run: |
           mkdir -p dist/wipeout-multi-linux-x64
@@ -109,4 +113,4 @@ jobs:
           body: |
             wipEout rewrite, multi / VFX branch. Game data (the `wipeout/` folder) is not included: copy your own next to the binary.
 
-            Linux and macOS builds link dynamically against SDL2 and GLEW (`apt install libsdl2-2.0-0 libglew2.2` / `brew install sdl2 glew`). The Windows zip includes the DLLs.
+            Linux: GLEW is built into the binary, so it runs on any distro (Mint, Ubuntu, Manjaro...) whatever GLEW version is installed, or none. Only SDL2 is needed (`libsdl2-2.0-0`, usually already installed). macOS needs `brew install sdl2 glew`. The Windows zip includes the DLLs.

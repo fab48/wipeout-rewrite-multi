@@ -53,7 +53,14 @@ ifeq ($(UNAME_S), Darwin)
 
 else ifeq ($(UNAME_S), Linux)
 	ifeq ($(RENDERER), GL)
-		L_FLAGS := $(L_FLAGS) -lGLEW
+		# GLEW_STATIC=true links libGLEW.a into the binary, so release builds
+		# run on any distro whatever GLEW version it ships (2.2, 2.3...) or none.
+		ifeq ($(GLEW_STATIC), true)
+			C_FLAGS := $(C_FLAGS) -DGLEW_STATIC
+			L_FLAGS := $(L_FLAGS) -Wl,-Bstatic -lGLEW -Wl,-Bdynamic -lGLX
+		else
+			L_FLAGS := $(L_FLAGS) -lGLEW
+		endif
 
 		# Prefer modern GLVND instead of legacy X11-only GLX
 		ifeq ($(USE_GLX), true)
