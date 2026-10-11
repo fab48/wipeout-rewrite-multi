@@ -298,6 +298,10 @@ void input_capture(input_capture_callback_t cb, void *user) {
 	input_clear();
 }
 
+bool input_capture_active(void) {
+	return capture_callback != NULL;
+}
+
 void input_textinput(int32_t ascii_char) {
 	if (capture_callback) {
 		capture_callback(capture_user, INPUT_INVALID, ascii_char);

@@ -29,9 +29,11 @@ settings_t settings = {
 
 	.split_vertical = false,
 	.swap_gamepads = false,
-	.external_view = false,
+	.external_view = true, // chase camera by default
 	.draw_distance = 0,
 	.net_pilot = 0,
+
+	.graphics_preset = -1, // unknown until settings_load() detects it
 
 	.is_dirty = false,
 };
@@ -63,6 +65,7 @@ static const setting_def_t setting_defs[] = {
 	{"external_view",        SETTING_BOOL,  &settings.external_view, 0, 1},
 	{"draw_distance",        SETTING_INT,   &settings.draw_distance, 0, 3},
 	{"net_pilot",            SETTING_INT,   &settings.net_pilot, 0, 7},
+	{"graphics_preset",      SETTING_INT,   &settings.graphics_preset, 0, NUM_GRAPHICS_PRESETS - 1},
 };
 
 static void setting_set(const setting_def_t *def, float value) {
@@ -102,11 +105,86 @@ static void settings_migrate_from_post_effect(int post) {
 	settings.is_dirty = true; // write the text file right away
 }
 
+// What each preset sets. Bloom/motion blur strengths and brightness are left
+// alone: they are taste, not cost.
+typedef struct {
+	bool crt, bloom, motion_blur, tonemap, lighting, texture_smooth, texture_upscale;
+	int point_lights;
+	int draw_distance; // 0..3: FULL, FAR, MEDIUM, NEAR
+	int screen_res;    // render_resolution_t
+} graphics_preset_def_t;
+
+static const graphics_preset_def_t graphics_presets[] = {
+	[GRAPHICS_PRESET_ORIGINAL] = {
+		.crt = true, .bloom = false, .motion_blur = false, .tonemap = false, .lighting = false,
+		.texture_smooth = false, .texture_upscale = false, .point_lights = 0,
+		.draw_distance = 2, .screen_res = RENDER_RES_480P,
+	},
+	[GRAPHICS_PRESET_LOW] = {
+		.crt = false, .bloom = false, .motion_blur = false, .tonemap = false, .lighting = false,
+		.texture_smooth = true, .texture_upscale = false, .point_lights = 0,
+		.draw_distance = 0, .screen_res = RENDER_RES_720P,
+	},
+	[GRAPHICS_PRESET_HQ] = {
+		.crt = false, .bloom = true, .motion_blur = true, .tonemap = true, .lighting = true,
+		.texture_smooth = true, .texture_upscale = true, .point_lights = 4,
+		.draw_distance = 0, .screen_res = RENDER_RES_NATIVE,
+	},
+};
+
+static int settings_detect_graphics_preset(void) {
+	for (int i = 0; i < len(graphics_presets); i++) {
+		const graphics_preset_def_t *p = &graphics_presets[i];
+		if (
+			settings.crt == p->crt && settings.bloom == p->bloom &&
+			settings.motion_blur == p->motion_blur && settings.tonemap == p->tonemap &&
+			settings.lighting == p->lighting && settings.texture_smooth == p->texture_smooth &&
+			settings.texture_upscale == p->texture_upscale && settings.point_lights == p->point_lights &&
+			settings.draw_distance == p->draw_distance && save.screen_res == p->screen_res
+		) {
+			return i;
+		}
+	}
+	return GRAPHICS_PRESET_CUSTOM;
+}
+
+void settings_apply_graphics_preset(int preset) {
+	if (preset < 0 || preset >= len(graphics_presets)) {
+		settings.graphics_preset = GRAPHICS_PRESET_CUSTOM; // keep everything as it is
+		settings_set_dirty();
+		return;
+	}
+	const graphics_preset_def_t *p = &graphics_presets[preset];
+	settings.crt = p->crt;
+	settings.bloom = p->bloom;
+	settings.motion_blur = p->motion_blur;
+	settings.tonemap = p->tonemap;
+	settings.lighting = p->lighting;
+	settings.texture_smooth = p->texture_smooth;
+	settings.texture_upscale = p->texture_upscale;
+	settings.point_lights = p->point_lights;
+	settings.draw_distance = p->draw_distance;
+	settings.graphics_preset = preset;
+
+	if (save.screen_res != p->screen_res) {
+		save.screen_res = p->screen_res;
+		save.is_dirty = true;
+		render_set_resolution(save.screen_res);
+	}
+	settings_set_dirty();
+}
+
+void settings_graphics_changed(void) {
+	settings.graphics_preset = settings_detect_graphics_preset();
+	settings_set_dirty();
+}
+
 void settings_load(void) {
 	uint32_t size = 0;
 	uint8_t *bytes = platform_load_userdata(SETTINGS_FILE, &size);
 	if (!bytes) {
 		settings_migrate_from_post_effect(save.post_effect);
+		settings.graphics_preset = settings_detect_graphics_preset();
 		return;
 	}
 
@@ -135,6 +213,12 @@ void settings_load(void) {
 	}
 	mem_temp_free(text);
 	settings.is_dirty = false;
+
+	// Files from before the presets existed: name what they amount to
+	if (settings.graphics_preset < 0) {
+		settings.graphics_preset = settings_detect_graphics_preset();
+		settings.is_dirty = true;
+	}
 }
 
 void settings_store_if_dirty(void) {

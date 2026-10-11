@@ -187,6 +187,12 @@ void menu_update(menu_t *menu) {
 		}
 	}
 
+	// While a page captures raw input (key binding, text entry) its capture
+	// callback handles every key, Backspace and Escape included
+	if (input_capture_active()) {
+		return;
+	}
+
 	// Handle back buttons
 	if (input_pressed(A_MENU_BACK) || input_pressed(A_MENU_QUIT)) {
 		if (menu->index != 0) {

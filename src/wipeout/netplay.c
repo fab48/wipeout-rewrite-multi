@@ -102,7 +102,11 @@ static void netplay_load_config(void) {
 			*next++ = '\0';
 		}
 		char key[32], value[128];
-		if (sscanf(line, " %31[a-z_] = %127s", key, value) == 2) {
+		if (sscanf(line, " %31[a-z_] = %127[^\n]", key, value) == 2) {
+			// The value runs to the end of the line ("name = FAB ASUS")
+			for (int n = strlen(value); n > 0 && isspace((unsigned char)value[n - 1]); n--) {
+				value[n - 1] = '\0';
+			}
 			if (strcmp(key, "name") == 0) {
 				net_sanitize_name(np.name, value);
 			}
@@ -285,6 +289,44 @@ bool netplay_take_return_to_lan(void) {
 	bool r = np.return_to_lan;
 	np.return_to_lan = false;
 	return r;
+}
+
+const char *netplay_name(void) {
+	return np.name;
+}
+
+// Saves the name in lan.txt, keeping the other lines (join, port) as they are
+void netplay_set_name(const char *name) {
+	net_sanitize_name(np.name, name);
+
+	char out[1024];
+	int p = 0;
+	uint32_t size = 0;
+	uint8_t *bytes = platform_load_userdata("lan.txt", &size);
+	if (bytes) {
+		char *text = mem_temp_alloc(size + 1);
+		memcpy(text, bytes, size);
+		text[size] = '\0';
+		mem_temp_free(bytes);
+
+		char *line = text;
+		while (line && *line) {
+			char *next = strchr(line, '\n');
+			if (next) {
+				*next++ = '\0';
+			}
+			char key[32];
+			bool is_name = sscanf(line, " %31[a-z_] =", key) == 1 && strcmp(key, "name") == 0;
+			if (!is_name && line[0] && p < (int)sizeof(out) - 64) {
+				p += snprintf(out + p, sizeof(out) - p, "%s\n", line);
+			}
+			line = next;
+		}
+		mem_temp_free(text);
+	}
+	p += snprintf(out + p, sizeof(out) - p, "name = %s\n", np.name);
+	platform_store_userdata("lan.txt", out, p);
+	printf("net: player name is now %s\n", np.name);
 }
 
 void netplay_set_pilot(int pilot) {

@@ -29,10 +29,26 @@ typedef struct {
 
 	int net_pilot; // preferred pilot in LAN games
 
+	int graphics_preset; // graphics_preset_t
+
 	bool is_dirty;
 } settings_t;
 
 extern settings_t settings;
+
+// Graphics presets. Each one sets the render effects, the resolution and the
+// draw distance. Changing one of those by hand shows CUSTOM, unless the new
+// combination happens to match a preset.
+typedef enum {
+	GRAPHICS_PRESET_ORIGINAL, // CRT, 480p, medium draw distance, no modern effects
+	GRAPHICS_PRESET_LOW,      // 720p, full draw distance, no post processing (old PCs)
+	GRAPHICS_PRESET_HQ,       // every effect on, native resolution
+	GRAPHICS_PRESET_CUSTOM,
+	NUM_GRAPHICS_PRESETS
+} graphics_preset_t;
+
+void settings_apply_graphics_preset(int preset);
+void settings_graphics_changed(void); // a single graphics option was changed by hand
 
 void settings_load(void);
 void settings_store_if_dirty(void);

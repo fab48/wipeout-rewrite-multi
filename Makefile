@@ -1,4 +1,5 @@
 CC ?= gcc
+comma := ,
 EMCC ?= emcc
 UNAME_S := $(shell uname -s)
 RENDERER ?= GL
@@ -152,7 +153,7 @@ sdl: $(COMMON_OBJ)
 HEADLESS_SRC = $(filter-out src/render_gl.c src/render_software.c, $(COMMON_SRC)) src/render_null.c src/platform_null.c
 HEADLESS_OBJ = $(patsubst %.c, build/obj/headless/%.o, $(HEADLESS_SRC))
 headless: $(HEADLESS_OBJ)
-	$(CC) $^ -o wipegame-headless $(filter-out -lglew32 -lopengl32 -lGLEW -lGL -lOpenGL, $(L_FLAGS)) $(if $(filter Msys,$(shell uname -o)),-lwinmm,)
+	$(CC) $^ -o wipegame-headless $(filter-out -lglew32 -lopengl32 -lGLEW -lGL -lOpenGL -lGLX -Wl$(comma)-Bstatic -Wl$(comma)-Bdynamic, $(L_FLAGS)) $(if $(filter Msys,$(shell uname -o)),-lwinmm,)
 
 build/obj/headless/%.o: %.c
 	mkdir -p $(dir $@)

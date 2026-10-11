@@ -42,7 +42,9 @@ Binaries for Linux, Windows and macOS are built by GitHub Actions for every
 
 ## LAN game (up to 8 players)
 
-- Main menu > **LAN GAME**: pick your pilot, then **HOST A GAME** or
+- Main menu > **LAN GAME**: type your name (**NAME**, up to 10 letters and
+  digits, saved in `lan.txt`; the computer name is used until then), pick
+  your pilot, then **HOST A GAME** or
   **JOIN A GAME** (hosts on the local network are found automatically).
   In the lobby the host chooses class and circuit and starts the race; free
   places are taken by CPU ships. Every player needs the same game data.
@@ -81,8 +83,13 @@ and that the snapshot stream is healthy.
 
 ## Options
 
-- Video: draw distance (FULL/FAR/MEDIUM/NEAR), default view (internal /
-  external), split screen orientation, 720p resolution, and the **RENDER
+- Video: **GRAPHICS PRESET**
+  - ORIGINAL: CRT filter, 480p, medium draw distance, no modern effects
+  - LOW: 720p, full draw distance, no post processing, no PBR (old PCs)
+  - HQ REMASTER: every effect on, native resolution
+  - CUSTOM: changing any graphics option by hand switches to it
+- Video: draw distance (FULL/FAR/MEDIUM/NEAR), default view (external by
+  default, or internal), split screen orientation, 720p resolution, and the **RENDER
   EFFECTS** page (CRT, bloom, bloom threshold and intensity, motion blur and
   strength, tonemapping, PBR lighting, lighting brightness, point lights).
 - Settings are stored in `settings.txt` (key = value) next to `save.dat`;

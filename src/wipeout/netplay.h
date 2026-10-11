@@ -50,6 +50,8 @@ bool netplay_take_return_to_lan(void); // once after leaving a LAN game
 // Lobby
 void netplay_host_start_race(void);
 void netplay_set_pilot(int pilot);
+const char *netplay_name(void);
+void netplay_set_name(const char *name); // also saved to lan.txt
 
 // Who controls which ship
 int netplay_player_for_pilot(int pilot);

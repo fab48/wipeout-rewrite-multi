@@ -391,6 +391,7 @@ static void toggle_res(menu_t *menu, int data) {
 	render_set_resolution(data);
 	save.screen_res = data;
 	save.is_dirty = true;
+	settings_graphics_changed();
 }
 
 // Toggles backed by the settings struct (settings.txt)
@@ -400,17 +401,30 @@ static void toggle_res(menu_t *menu, int data) {
 		settings_set_dirty(); \
 	}
 
-SETTINGS_TOGGLE(toggle_crt, crt)
-SETTINGS_TOGGLE(toggle_bloom, bloom)
+// Same, for the options that are part of the graphics presets
+#define GRAPHICS_TOGGLE(NAME, FIELD) \
+	static void NAME(menu_t *menu, int data) { \
+		settings.FIELD = data; \
+		settings_graphics_changed(); \
+	}
+
+GRAPHICS_TOGGLE(toggle_crt, crt)
+GRAPHICS_TOGGLE(toggle_bloom, bloom)
 SETTINGS_TOGGLE(toggle_bloom_threshold, bloom_threshold)
-SETTINGS_TOGGLE(toggle_motion_blur, motion_blur)
-SETTINGS_TOGGLE(toggle_tonemap, tonemap)
-SETTINGS_TOGGLE(toggle_lighting, lighting)
+GRAPHICS_TOGGLE(toggle_motion_blur, motion_blur)
+GRAPHICS_TOGGLE(toggle_tonemap, tonemap)
+GRAPHICS_TOGGLE(toggle_lighting, lighting)
 SETTINGS_TOGGLE(toggle_split, split_vertical)
 SETTINGS_TOGGLE(toggle_default_view, external_view)
-SETTINGS_TOGGLE(toggle_draw_distance, draw_distance)
-SETTINGS_TOGGLE(toggle_texture_smooth, texture_smooth)
-SETTINGS_TOGGLE(toggle_texture_upscale, texture_upscale)
+GRAPHICS_TOGGLE(toggle_draw_distance, draw_distance)
+GRAPHICS_TOGGLE(toggle_texture_smooth, texture_smooth)
+GRAPHICS_TOGGLE(toggle_texture_upscale, texture_upscale)
+
+static const char *opts_graphics_preset[] = {"ORIGINAL", "LOW", "HQ REMASTER", "CUSTOM"};
+
+static void toggle_graphics_preset(menu_t *menu, int data) {
+	settings_apply_graphics_preset(data);
+}
 
 static const char *opts_texture_filter[] = {"SHARP", "SMOOTH"};
 
@@ -463,7 +477,7 @@ static int point_lights_option_index(void) {
 
 static void toggle_point_lights(menu_t *menu, int data) {
 	settings.point_lights = point_light_counts[data];
-	settings_set_dirty();
+	settings_graphics_changed();
 }
 
 static void toggle_screen_shake(menu_t *menu, int data) {
@@ -505,8 +519,36 @@ static void button_effects(menu_t *menu, int data) {
 	page_options_effects_init(menu);
 }
 
+// A preset changes several options at once, and the render effects page
+// changes the preset: keep the toggles on this page in step every frame.
+static void page_options_video_draw(menu_t *menu, int data) {
+	menu_page_t *page = &menu->pages[menu->index];
+	for (int i = 0; i < page->entries_len; i++) {
+		menu_entry_t *entry = &page->entries[i];
+		if (entry->select_func == toggle_graphics_preset) {
+			entry->data = clamp(settings.graphics_preset, 0, NUM_GRAPHICS_PRESETS - 1);
+		}
+		else if (entry->select_func == toggle_res) {
+			entry->data = save.screen_res;
+		}
+		else if (entry->select_func == toggle_draw_distance) {
+			entry->data = settings.draw_distance;
+		}
+	}
+	if (page->index < page->entries_len && page->entries[page->index].select_func == toggle_graphics_preset) {
+		static const char *preset_help[] = {
+			"CRT FILTER  480P  MEDIUM DRAW DISTANCE",
+			"720P  FULL DRAW DISTANCE  NO POST PROCESS",
+			"ALL EFFECTS ON  NATIVE RESOLUTION",
+			"YOUR OWN SETTINGS",
+		};
+		int preset = clamp(settings.graphics_preset, 0, NUM_GRAPHICS_PRESETS - 1);
+		ui_draw_text_centered(preset_help[preset], ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -24)), UI_SIZE_8, UI_COLOR_DEFAULT);
+	}
+}
+
 static void page_options_video_init(menu_t *menu) {
-	menu_page_t *page = menu_push(menu, "VIDEO OPTIONS", NULL);
+	menu_page_t *page = menu_push(menu, "VIDEO OPTIONS", page_options_video_draw);
 	flags_set(page->layout_flags, MENU_VERTICAL | MENU_FIXED);
 	page->title_pos = vec2i(-160, -100);
 	page->title_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
@@ -514,6 +556,7 @@ static void page_options_video_init(menu_t *menu) {
 	page->block_width = 320;
 	page->items_anchor = UI_POS_MIDDLE | UI_POS_CENTER;
 
+	menu_page_add_toggle(page, clamp(settings.graphics_preset, 0, NUM_GRAPHICS_PRESETS - 1), "GRAPHICS PRESET", opts_graphics_preset, len(opts_graphics_preset), toggle_graphics_preset);
 	#ifndef __EMSCRIPTEN__
 		menu_page_add_toggle(page, save.fullscreen, "FULLSCREEN", opts_off_on, len(opts_off_on), toggle_fullscreen);
 	#endif
@@ -1031,6 +1074,8 @@ static const char *lan_circuit_names[NUM_WIPEOUT_CIRCUITS];
 static int lan_circuit_ids[NUM_WIPEOUT_CIRCUITS];
 static int lan_circuits_len;
 static char lan_host_labels[NET_MAX_FOUND_HOSTS][48];
+static const char *lan_name_option[1]; // the NAME entry shows the player name
+static char lan_name_shown[NET_NAME_LEN];
 
 static void lan_names_init(void) {
 	for (int i = 0; i < NUM_PILOTS; i++) {
@@ -1123,6 +1168,10 @@ static void page_lan_draw(menu_t *menu, int data) {
 		netplay_leave(NULL);
 	}
 
+	// The NAME entry shows the current player name as its value
+	snprintf(lan_name_shown, sizeof(lan_name_shown), "%s", netplay_name());
+	lan_name_option[0] = lan_name_shown;
+
 	draw_model(g.ships[settings.net_pilot % NUM_PILOTS].model, vec2(0, -0.2), vec3(0, 0, -700), system_cycle_time());
 
 	const char *status = netplay_status_text();
@@ -1131,8 +1180,79 @@ static void page_lan_draw(menu_t *menu, int data) {
 	}
 }
 
+// Player name ----------------------------------------------------------------
+// Typed on the keyboard; it replaces the computer name in the lobby and above
+// the ships, and is saved in lan.txt.
+
+static char lan_name_edit[NET_NAME_LEN];
+static int lan_name_edit_len;
+static void lan_name_capture(void *user, button_t button, int32_t ascii_char) {
+	menu_t *menu = (menu_t *)user;
+
+	// Typed characters arrive separately from the keys themselves
+	if (button == INPUT_INVALID) {
+		char c = (char)ascii_char;
+		if (c >= 'a' && c <= 'z') {
+			c = c - 'a' + 'A';
+		}
+		bool valid = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c == ' ' && lan_name_edit_len > 0);
+		if (valid && lan_name_edit_len < NET_NAME_MAX_CHARS) {
+			lan_name_edit[lan_name_edit_len++] = c;
+			lan_name_edit[lan_name_edit_len] = '\0';
+			sfx_play(SFX_MENU_MOVE);
+		}
+		return;
+	}
+
+	if (button == INPUT_KEY_BACKSPACE) {
+		if (lan_name_edit_len > 0) {
+			lan_name_edit[--lan_name_edit_len] = '\0';
+			sfx_play(SFX_MENU_MOVE);
+		}
+	}
+	else if (button == INPUT_KEY_RETURN || button == INPUT_KEY_KP_ENTER || button == INPUT_GAMEPAD_A || button == INPUT_GAMEPAD_START) {
+		if (lan_name_edit_len > 0) {
+			netplay_set_name(lan_name_edit);
+		}
+		sfx_play(SFX_MENU_SELECT);
+		input_capture(NULL, NULL);
+		menu_pop(menu);
+	}
+	else if (button == INPUT_KEY_ESCAPE || button == INPUT_GAMEPAD_B) {
+		sfx_play(SFX_MENU_SELECT);
+		input_capture(NULL, NULL);
+		menu_pop(menu);
+	}
+}
+
+static void page_lan_name_draw(menu_t *menu, int data) {
+	ui_pos_t anchor = UI_POS_MIDDLE | UI_POS_CENTER;
+	int width = ui_text_width(lan_name_edit, UI_SIZE_16);
+	ui_draw_text_centered(lan_name_edit, ui_scaled_pos(anchor, vec2i(0, -10)), UI_SIZE_16, UI_COLOR_ACCENT);
+
+	// The font has no underscore: draw the cursor as a bar after the text
+	if (blink()) {
+		vec2i_t cursor_pos = ui_scaled_pos(anchor, vec2i(width / 2 + 2, 4));
+		render_push_2d(cursor_pos, ui_scaled(vec2i(10, 2)), UI_COLOR_ACCENT, RENDER_NO_TEXTURE);
+	}
+	ui_draw_text_centered("LETTERS AND DIGITS  10 MAX", ui_scaled_pos(anchor, vec2i(0, 24)), UI_SIZE_8, UI_COLOR_DEFAULT);
+	ui_draw_text_centered("ENTER TO SAVE  ESC TO CANCEL", ui_scaled_pos(anchor, vec2i(0, 38)), UI_SIZE_8, UI_COLOR_DEFAULT);
+}
+
+static void button_lan_name(menu_t *menu, int data) {
+	snprintf(lan_name_edit, sizeof(lan_name_edit), "%s", netplay_name());
+	lan_name_edit_len = strlen(lan_name_edit);
+	menu_page_t *page = menu_push(menu, "ENTER YOUR NAME", page_lan_name_draw);
+	flags_add(page->layout_flags, MENU_FIXED);
+	page->title_pos = vec2i(0, 30);
+	page->title_anchor = UI_POS_TOP | UI_POS_CENTER;
+	input_capture(lan_name_capture, menu);
+}
+
 static void page_lan_init(menu_t *menu) {
 	lan_names_init();
+	snprintf(lan_name_shown, sizeof(lan_name_shown), "%s", netplay_name());
+	lan_name_option[0] = lan_name_shown;
 	menu_page_t *page = menu_push(menu, "LAN GAME", page_lan_draw);
 	flags_add(page->layout_flags, MENU_FIXED);
 	page->title_pos = vec2i(0, 30);
@@ -1144,6 +1264,7 @@ static void page_lan_init(menu_t *menu) {
 
 	menu_page_add_button(page, 0, "HOST A GAME", button_lan_host);
 	menu_page_add_button(page, 0, "JOIN A GAME", button_lan_join);
+	menu_page_add_toggle(page, 0, "NAME", lan_name_option, 1, button_lan_name);
 	menu_page_add_toggle(page, settings.net_pilot % NUM_PILOTS, "PILOT", lan_pilot_names, len(lan_pilot_names), toggle_lan_pilot);
 }
 

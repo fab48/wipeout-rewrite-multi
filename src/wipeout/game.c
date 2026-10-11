@@ -1155,12 +1155,30 @@ void game_update(void) {
 		printf("wrote controls2.dat\n");
 	}
 
-	double now = platform_now();
-	g.frame_time = now - frame_start_time;
-	if (g.frame_time > 0) {
-		g.frame_rate = ((double)g.frame_rate * 0.95) + (1.0/g.frame_time) * 0.05;
+	// Frame timing. This used to measure only the time spent inside
+	// game_update(), which leaves out the post process, the buffer swap and
+	// the wait for vsync, so the FPS counter showed several hundred FPS on a
+	// 60 Hz screen. Measure the real interval between two frames instead,
+	// and average the frame rate over half a second windows.
+	static double last_frame_start = 0;
+	static double fps_window_start = 0;
+	static int fps_window_frames = 0;
+	if (last_frame_start > 0) {
+		g.frame_time = frame_start_time - last_frame_start;
 	}
-	
+	last_frame_start = frame_start_time;
+
+	if (fps_window_start == 0) {
+		fps_window_start = frame_start_time;
+	}
+	fps_window_frames++;
+	double fps_window = frame_start_time - fps_window_start;
+	if (fps_window >= 0.5) {
+		g.frame_rate = (fps_window_frames - 1) / fps_window;
+		fps_window_start = frame_start_time;
+		fps_window_frames = 1;
+	}
+
 	// The only drawing left here should be the post process
 }
 

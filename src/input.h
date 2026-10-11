@@ -210,6 +210,7 @@ void input_set_mouse_pos(int32_t x, int32_t y);
 void input_textinput(int32_t ascii_char);
 
 void input_capture(input_capture_callback_t cb, void *user);
+bool input_capture_active(void); // a capture callback receives all input
 
 float input_state(uint8_t action);
 bool input_pressed(uint8_t action);
