@@ -7,9 +7,14 @@
 // as their IEEE bit pattern. Every decoder checks bounds and value ranges, so
 // that a truncated, corrupted or hostile datagram is rejected instead of
 // crashing the game. Nothing in here depends on the game state.
+//
+// The snapshot is packed to stay below NET_SNAPSHOT_SAFE_SIZE: positions stay
+// floats, angles are 16 bit, velocities and timers are scaled 16 bit integers.
+// Every snapshot is still complete on its own; nothing relies on an earlier
+// one having arrived.
 
 #define NET_PROTOCOL_MAGIC   0x4f57 // "WO"
-#define NET_PROTOCOL_VERSION 1
+#define NET_PROTOCOL_VERSION 2
 #define NET_DEFAULT_PORT     47800
 
 #define NET_MAX_PLAYERS      8
@@ -22,6 +27,13 @@
 #define NET_NUM_ACTIONS      9   // A_UP .. A_CHANGE_VIEW
 #define NET_NUM_LAPS         3
 #define NET_MAX_PACKET       8192
+
+// Bigger UDP packets are IP fragmented; on Wi-Fi losing one fragment loses
+// the whole packet
+#define NET_SNAPSHOT_SAFE_SIZE 1400
+
+// Ship flags that travel in a snapshot; the game checks that its flags fit
+#define NET_SHIP_FLAG_BITS   24
 
 typedef enum {
 	NET_MSG_DISCOVER = 1,  // client -> broadcast: is there a host?
@@ -75,6 +87,7 @@ void net_write_f32(net_writer_t *w, float v);
 void net_write_vec3(net_writer_t *w, vec3_t v);
 void net_write_bytes(net_writer_t *w, const void *src, int len);
 void net_write_header(net_writer_t *w, net_msg_type_t type);
+void net_write_header_version(net_writer_t *w, uint8_t version, net_msg_type_t type);
 
 // Player names: upper case A..Z and 0..9; anything else becomes a single
 // space ("Fab-Asus" -> "FAB ASUS"), at most NET_NAME_MAX_CHARS, never empty.
@@ -89,6 +102,11 @@ vec3_t net_read_vec3(net_reader_t *r);
 void net_read_bytes(net_reader_t *r, void *dst, int len);
 // Checks magic and version; returns the message type or 0
 net_msg_type_t net_read_header(net_reader_t *r);
+
+// Quantization, shared with the tests: what the receiver will get
+float net_quantize_angle(float a);           // 16 bit, wrapped to -PI..PI
+float net_quantize(float v, float scale);    // signed 16 bit of v * scale
+float net_quantize_u(float v, float scale);  // unsigned 16 bit of v * scale
 
 
 // Messages ------------------------------------------------------------------
@@ -146,6 +164,13 @@ typedef struct {
 	float best_lap;
 } net_result_t;
 
+typedef enum {
+	NET_PAUSE_NONE,
+	NET_PAUSE_WAITING,   // a player dropped out; the host decides: wait or kick
+	NET_PAUSE_RESUMING,  // everybody is back; counting down to the restart
+	NET_PAUSE_MAX
+} net_pause_t;
+
 typedef struct {
 	uint32_t session;
 	float host_time;
@@ -154,6 +179,9 @@ typedef struct {
 	uint8_t race_class;
 	uint8_t circuit;
 	int8_t your_slot;   // the slot of the receiving client, -1 if none
+	uint8_t pause;      // net_pause_t; the race is frozen while not NONE
+	uint8_t pause_mask; // the slots we are waiting for
+	float pause_timer;  // seconds: waited so far, or left until the restart
 	net_slot_info_t slots[NET_MAX_PLAYERS];
 	uint8_t num_results; // only in NET_PHASE_RESULTS
 	net_result_t results[NET_MAX_SHIPS];
@@ -167,7 +195,7 @@ typedef struct {
 // Snapshot ------------------------------------------------------------------
 
 typedef struct {
-	uint32_t flags;
+	uint32_t flags;       // the low NET_SHIP_FLAG_BITS
 	int16_t section;
 	int8_t lap;
 	uint8_t rank;
@@ -176,15 +204,13 @@ typedef struct {
 	uint8_t brake_left;   // 0..255 for 0..256
 	uint8_t brake_right;
 	vec3_t position;
-	vec3_t velocity;
-	vec3_t angle;
-	vec3_t angular_velocity;
-	float speed;
-	float thrust_mag;
+	vec3_t velocity;      // steps of 0.5, clamped to +-16383
+	vec3_t angle;         // wrapped to -PI..PI
+	float speed;          // steps of 1, 0..65535
+	float thrust_mag;     // steps of 0.25, 0..16383
 	float lap_time;
-	float update_timer;
-	float turbo_timer;
-	float lap_times[NET_NUM_LAPS];
+	float update_timer;   // ms, -32..32 s
+	float turbo_timer;    // ms, 0..65 s
 } net_ship_state_t;
 
 typedef enum {
@@ -198,13 +224,14 @@ typedef enum {
 
 typedef struct {
 	uint8_t kind;
-	uint8_t owner; // pilot index
+	uint8_t owner;   // pilot index
 	vec3_t position;
 	vec3_t angle;
-	vec3_t velocity;
-	float timer;
+	vec3_t velocity; // steps of 0.25, clamped to +-8191; not sent when zero (mines)
+	float timer;     // 1/100 s, 0..655 s
 } net_weapon_state_t;
 
+// Only the droids that are busy with a rescue are sent
 typedef struct {
 	uint8_t pilot;   // the ship this droid looks after
 	uint8_t tractor; // tractor beam sound on
@@ -212,17 +239,20 @@ typedef struct {
 	vec3_t angle;
 } net_droid_state_t;
 
+// Only the fields listed are sent; the others arrive as 0 (target as -1)
 typedef enum {
-	NET_EVENT_SFX = 1,       // a: sound; target pilot or -1 for everybody; non positional
-	NET_EVENT_SFX_AT,        // a: sound; pos; value: volume
-	NET_EVENT_EXPLOSION,     // a: particle type; pos; b=0: vec is the debris velocity, b=1: the flash offset
-	NET_EVENT_SPARKS,        // pos; vec: normal; value: strength; b: pilot (for the drift)
+	NET_EVENT_SFX = 1,       // a: sound; target pilot or -1 for everybody; non positional; value: pitch
+	NET_EVENT_SFX_AT,        // a: sound; pos; value: volume 0..1 (8 bit)
+	NET_EVENT_EXPLOSION,     // a: particle type; pos; b=0: vec is the debris velocity, b=1: the flash offset (16 bit, steps of 1)
+	NET_EVENT_SPARKS,        // pos; vec: normal (8 bit per axis); value: strength 0..1 (8 bit); b: pilot (for the drift)
 	NET_EVENT_FLASH,         // a: particle type; pos
-	NET_EVENT_SHAKE,         // target pilot; value: duration
+	NET_EVENT_SHAKE,         // target pilot; value: duration (ms)
 	NET_EVENT_COUNTDOWN,     // a: 3, 2, 1 or 0 for go
 	NET_EVENT_MAX
 } net_event_type_t;
 
+// Within a snapshot the event sequence numbers ascend and span less than
+// 65536 (they are sent relative to the first one)
 typedef struct {
 	uint32_t seq;
 	uint8_t type;
@@ -241,6 +271,9 @@ typedef struct {
 	float host_time;
 	uint8_t num_ships;
 	net_ship_state_t ships[NET_MAX_SHIPS];
+	// The lap times change once a lap: one ship's per snapshot, in turn
+	int8_t lap_times_pilot; // -1 for none
+	float lap_times[NET_NUM_LAPS];
 	uint8_t num_weapons;
 	net_weapon_state_t weapons[NET_MAX_WEAPONS];
 	uint8_t num_droids;
@@ -263,6 +296,14 @@ int net_encode_leave(uint8_t *buf, int cap, const net_msg_leave_t *m);
 int net_encode_lobby(uint8_t *buf, int cap, const net_msg_lobby_t *m);
 int net_encode_reject(uint8_t *buf, int cap, const net_msg_reject_t *m);
 int net_encode_snapshot(uint8_t *buf, int cap, const net_snapshot_t *m);
+
+// Answers to a peer that speaks another protocol version, in that version's
+// format (the header, HOST_INFO and REJECT never change), so that it can say
+// "version mismatch" instead of finding nothing
+int net_encode_host_info_version(uint8_t *buf, int cap, uint8_t version, const net_msg_host_info_t *m);
+int net_encode_reject_version(uint8_t *buf, int cap, uint8_t version, const net_msg_reject_t *m);
+// The version of a packet with our magic, or -1
+int net_peek_version(const uint8_t *buf, int len);
 
 net_msg_type_t net_peek_type(const uint8_t *buf, int len);
 bool net_decode_host_info(const uint8_t *buf, int len, net_msg_host_info_t *m);

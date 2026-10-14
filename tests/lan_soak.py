@@ -148,8 +148,10 @@ def main():
             if "CONNECTION TO THE HOST LOST" in text:
                 failures.append("%s lost the connection" % name)
         else:
-            if "dropped out" in text:
-                failures.append("the host dropped a player: " + ", ".join(re.findall(r"net: (\S+) dropped out", text)))
+            if "is silent, the AI drives" in text:
+                failures.append("the AI had to take over for: " + ", ".join(re.findall(r"net: (.+?) is silent, the AI drives", text)))
+            if "pausing the race" in text:
+                failures.append("the host paused the race %d times" % text.count("pausing the race"))
             if text.count("everybody is ready, go") != args.races:
                 failures.append("the host started %d races" % text.count("everybody is ready, go"))
 

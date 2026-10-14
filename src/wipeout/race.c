@@ -227,6 +227,10 @@ bool race_menu_is_open(void) {
 	return active_menu != NULL;
 }
 
+bool race_menu_is(menu_t *menu) {
+	return active_menu == menu;
+}
+
 void race_update(void) {
 	if (is_paused) {
 		if (!active_menu) {

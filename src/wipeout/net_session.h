@@ -14,7 +14,9 @@
 //    second, so a lost packet is simply replaced by the next one.
 //  - Button presses travel as wrapping counters, so a press is never lost.
 //  - A slot that is silent for too long is dropped; a client that doesn't
-//    find itself in the lobby anymore joins again.
+//    find itself in the lobby anymore joins again. During a race the slot
+//    stays, so the player can come back.
+//  - A peer with another protocol version is told so (in its own format).
 
 #define NET_LOBBY_SEND_INTERVAL   0.1
 #define NET_CLIENT_SEND_INTERVAL_LOBBY 0.1
@@ -22,6 +24,7 @@
 #define NET_DISCOVER_INTERVAL     1.0
 #define NET_TIMEOUT               20.0 // Wi-Fi on old laptops can stall for seconds (scans, power save)
 #define NET_TIMEOUT_LOADING       45.0 // loading a track with the xBR upscale can take a while
+#define NET_TIMEOUT_RACE_CLIENT   60.0 // the host may pause the race and wait for us
 #define NET_FOUND_HOST_EXPIRE     3.5
 #define NET_MAX_FOUND_HOSTS       8
 
@@ -44,6 +47,7 @@ typedef enum {
 typedef struct {
 	bool used;
 	bool connected;
+	bool left;       // host: said goodbye (as opposed to just going silent)
 	uint32_t nonce;
 	net_addr_t addr;
 	double last_recv;
@@ -74,6 +78,7 @@ typedef struct {
 	uint32_t snapshots;
 	uint32_t snapshots_late;  // arrived after a newer one: dropped
 	uint32_t snapshots_missed; // gaps in the sequence
+	uint32_t snapshots_oversize; // host: still above NET_SNAPSHOT_SAFE_SIZE after shedding events
 	double snapshot_max_gap;  // longest time without a snapshot during a race
 	uint32_t slots_dropped;
 } net_stats_t;
@@ -103,6 +108,9 @@ typedef struct net_session_t {
 	int num_results;
 	net_result_t results[NET_MAX_SHIPS];
 	double phase_time; // when the current phase started
+	net_pause_t pause;
+	uint8_t pause_mask;
+	float pause_timer;
 
 	// Host
 	double next_lobby_send;
@@ -159,6 +167,9 @@ void net_session_host_start_loading(net_session_t *s);
 void net_session_host_set_phase(net_session_t *s, net_phase_t phase);
 void net_session_host_set_results(net_session_t *s, const net_result_t *results, int num);
 bool net_session_host_all_ready(net_session_t *s);
+void net_session_host_set_pause(net_session_t *s, net_pause_t pause, uint8_t mask, float timer);
+// Forget the presses made so far, e.g. during a pause: no edge on the next latch
+void net_session_host_reset_presses(net_session_t *s);
 void net_session_host_send_snapshot(net_session_t *s, const uint8_t *data, int len);
 // Turns the press counters received since the last call into edges
 void net_session_host_latch_presses(net_session_t *s);

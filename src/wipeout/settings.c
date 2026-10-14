@@ -32,6 +32,7 @@ settings_t settings = {
 	.external_view = true, // chase camera by default
 	.draw_distance = 0,
 	.net_pilot = 0,
+	.net_drop_pause = true,
 
 	.graphics_preset = -1, // unknown until settings_load() detects it
 
@@ -65,6 +66,7 @@ static const setting_def_t setting_defs[] = {
 	{"external_view",        SETTING_BOOL,  &settings.external_view, 0, 1},
 	{"draw_distance",        SETTING_INT,   &settings.draw_distance, 0, 3},
 	{"net_pilot",            SETTING_INT,   &settings.net_pilot, 0, 7},
+	{"net_drop_pause",       SETTING_BOOL,  &settings.net_drop_pause, 0, 1},
 	{"graphics_preset",      SETTING_INT,   &settings.graphics_preset, 0, NUM_GRAPHICS_PRESETS - 1},
 };
 

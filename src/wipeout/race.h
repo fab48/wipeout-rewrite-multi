@@ -20,5 +20,6 @@ void race_release_control(void);
 void race_release_ship(ship_t *ship);
 void race_show_menu(menu_t *menu);
 bool race_menu_is_open(void);
+bool race_menu_is(menu_t *menu);
 
 #endif

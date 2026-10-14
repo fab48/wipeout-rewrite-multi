@@ -79,7 +79,7 @@ static void fill_snapshot(net_snapshot_t *s) {
 	s->num_ships = NET_MAX_SHIPS;
 	for (int i = 0; i < s->num_ships; i++) {
 		net_ship_state_t *sh = &s->ships[i];
-		sh->flags = rnd();
+		sh->flags = rnd() & ((1 << NET_SHIP_FLAG_BITS) - 1);
 		sh->section = rnd() % 500;
 		sh->lap = (int)(rnd() % 5) - 1;
 		sh->rank = 1 + rnd() % 8;
@@ -89,16 +89,16 @@ static void fill_snapshot(net_snapshot_t *s) {
 		sh->brake_right = rnd();
 		sh->position = rndv();
 		sh->velocity = rndv();
-		sh->angle = rndv();
-		sh->angular_velocity = rndv();
+		sh->angle = (vec3_t){rndf(-10, 10), rndf(-10, 10), rndf(-10, 10)};
 		sh->speed = rndf(0, 40000);
 		sh->thrust_mag = rndf(0, 3000);
 		sh->lap_time = rndf(0, 100);
 		sh->update_timer = rndf(-1, 10);
 		sh->turbo_timer = rndf(0, 2);
-		for (int l = 0; l < NET_NUM_LAPS; l++) {
-			sh->lap_times[l] = rndf(0, 100);
-		}
+	}
+	s->lap_times_pilot = rnd() % NET_MAX_SHIPS;
+	for (int l = 0; l < NET_NUM_LAPS; l++) {
+		s->lap_times[l] = rndf(0, 100);
 	}
 	s->num_weapons = NET_MAX_WEAPONS;
 	for (int i = 0; i < s->num_weapons; i++) {
@@ -106,8 +106,8 @@ static void fill_snapshot(net_snapshot_t *s) {
 		w->kind = 1 + rnd() % (NET_WEAPON_KIND_MAX - 1);
 		w->owner = rnd() % NET_MAX_SHIPS;
 		w->position = rndv();
-		w->angle = rndv();
-		w->velocity = rndv();
+		w->angle = (vec3_t){rndf(-4, 4), rndf(-4, 4), rndf(-4, 4)};
+		w->velocity = (i & 3) == 0 ? (vec3_t){0, 0, 0} : (vec3_t){rndf(-2000, 2000), rndf(-2000, 2000), rndf(-2000, 2000)};
 		w->timer = rndf(0, 15);
 	}
 	s->num_droids = NET_MAX_PLAYERS;
@@ -115,7 +115,7 @@ static void fill_snapshot(net_snapshot_t *s) {
 		s->droids[i].pilot = i;
 		s->droids[i].tractor = rnd() & 1;
 		s->droids[i].position = rndv();
-		s->droids[i].angle = rndv();
+		s->droids[i].angle = (vec3_t){0, rndf(-4, 4), 0};
 	}
 	s->num_pickups = 37;
 	for (int i = 0; i < (s->num_pickups + 7) / 8; i++) {
@@ -123,16 +123,69 @@ static void fill_snapshot(net_snapshot_t *s) {
 	}
 	s->pickups[(s->num_pickups - 1) / 8] &= (1 << (s->num_pickups % 8)) - 1;
 	s->num_events = NET_MAX_EVENTS;
+	uint32_t seq = rnd();
 	for (int i = 0; i < s->num_events; i++) {
 		net_event_t *e = &s->events[i];
-		e->seq = rnd();
+		seq += 1 + rnd() % 3; // ascending, with gaps: some fell out of the window
+		e->seq = seq;
 		e->type = 1 + rnd() % (NET_EVENT_MAX - 1);
 		e->target = (int)(rnd() % 9) - 1;
 		e->a = rnd();
-		e->b = rnd();
+		e->b = rnd() % NET_MAX_SHIPS;
 		e->pos = rndv();
-		e->vec = rndv();
-		e->value = rndf(-10, 10);
+		e->vec = (vec3_t){rndf(-1, 1), rndf(-1, 1), rndf(-1, 1)};
+		e->value = rndf(0, 1);
+	}
+}
+
+static bool near(float a, float b, float tolerance) {
+	return fabsf(a - b) <= tolerance;
+}
+
+static bool near_angle(float a, float b) {
+	float d = fmodf(fabsf(a - b), (float)(M_PI * 2));
+	return d < 0.0002f || d > (float)(M_PI * 2) - 0.0002f;
+}
+
+// What the receiver must get for an event: the fields its type carries
+static void check_event(const net_event_t *got, const net_event_t *sent) {
+	CHECK_EQ_INT(got->seq, sent->seq);
+	CHECK_EQ_INT(got->type, sent->type);
+	switch (sent->type) {
+		case NET_EVENT_SFX:
+			CHECK_EQ_INT(got->target, sent->target);
+			CHECK_EQ_INT(got->a, sent->a);
+			CHECK(got->value == sent->value);
+			break;
+		case NET_EVENT_SFX_AT:
+			CHECK_EQ_INT(got->target, -1);
+			CHECK_EQ_INT(got->a, sent->a);
+			CHECK(memcmp(&got->pos, &sent->pos, sizeof(vec3_t)) == 0);
+			CHECK(near(got->value, sent->value, 1.0f / 254));
+			break;
+		case NET_EVENT_EXPLOSION:
+			CHECK_EQ_INT(got->a, sent->a);
+			CHECK_EQ_INT(got->b, sent->b);
+			CHECK(memcmp(&got->pos, &sent->pos, sizeof(vec3_t)) == 0);
+			CHECK(near(got->vec.x, sent->vec.x, 0.51f) && near(got->vec.z, sent->vec.z, 0.51f));
+			break;
+		case NET_EVENT_SPARKS:
+			CHECK_EQ_INT(got->b, sent->b);
+			CHECK(memcmp(&got->pos, &sent->pos, sizeof(vec3_t)) == 0);
+			CHECK(near(got->vec.x, sent->vec.x, 1.0f / 126) && near(got->vec.y, sent->vec.y, 1.0f / 126));
+			CHECK(near(got->value, sent->value, 1.0f / 254));
+			break;
+		case NET_EVENT_FLASH:
+			CHECK_EQ_INT(got->a, sent->a);
+			CHECK(memcmp(&got->pos, &sent->pos, sizeof(vec3_t)) == 0);
+			break;
+		case NET_EVENT_SHAKE:
+			CHECK_EQ_INT(got->target, sent->target);
+			CHECK(near(got->value, sent->value, 0.001f));
+			break;
+		case NET_EVENT_COUNTDOWN:
+			CHECK_EQ_INT(got->a, sent->a);
+			break;
 	}
 }
 
@@ -155,26 +208,140 @@ static void test_snapshot_roundtrip(void) {
 		CHECK_EQ_INT(b.num_pickups, a.num_pickups);
 		CHECK(memcmp(b.pickups, a.pickups, (a.num_pickups + 7) / 8) == 0);
 		for (int i = 0; i < a.num_ships; i++) {
-			CHECK_EQ_INT(b.ships[i].flags, a.ships[i].flags);
-			CHECK_EQ_INT(b.ships[i].section, a.ships[i].section);
-			CHECK_EQ_INT(b.ships[i].lap, a.ships[i].lap);
-			CHECK_EQ_INT(b.ships[i].weapon_target, a.ships[i].weapon_target);
-			CHECK(memcmp(&b.ships[i].position, &a.ships[i].position, sizeof(vec3_t)) == 0);
-			CHECK(b.ships[i].lap_times[2] == a.ships[i].lap_times[2]);
+			net_ship_state_t *x = &a.ships[i], *y = &b.ships[i];
+			CHECK_EQ_INT(y->flags, x->flags);
+			CHECK_EQ_INT(y->section, x->section);
+			CHECK_EQ_INT(y->lap, x->lap);
+			CHECK_EQ_INT(y->rank, x->rank);
+			CHECK_EQ_INT(y->weapon_type, x->weapon_type);
+			CHECK_EQ_INT(y->weapon_target, x->weapon_target);
+			CHECK_EQ_INT(y->brake_left, x->brake_left);
+			CHECK(memcmp(&y->position, &x->position, sizeof(vec3_t)) == 0);
+			CHECK(y->lap_time == x->lap_time);
+			CHECK(near_angle(y->angle.x, x->angle.x) && near_angle(y->angle.y, x->angle.y) && near_angle(y->angle.z, x->angle.z));
+			CHECK(y->angle.y >= -(float)M_PI && y->angle.y < (float)M_PI);
+			// Velocities beyond +-16383 are clamped
+			CHECK(near(y->velocity.x, fminf(fmaxf(x->velocity.x, -16383.5f), 16383.5f), 0.26f));
+			CHECK(near(y->speed, x->speed, 0.51f));
+			CHECK(near(y->thrust_mag, x->thrust_mag, 0.126f));
+			CHECK(near(y->update_timer, x->update_timer, 0.00051f));
+			CHECK(near(y->turbo_timer, x->turbo_timer, 0.00051f));
 		}
+		CHECK_EQ_INT(b.lap_times_pilot, a.lap_times_pilot);
+		CHECK(b.lap_times[2] == a.lap_times[2]);
 		for (int i = 0; i < a.num_weapons; i++) {
-			CHECK_EQ_INT(b.weapons[i].kind, a.weapons[i].kind);
-			CHECK(b.weapons[i].timer == a.weapons[i].timer);
+			net_weapon_state_t *x = &a.weapons[i], *y = &b.weapons[i];
+			CHECK_EQ_INT(y->kind, x->kind);
+			CHECK_EQ_INT(y->owner, x->owner);
+			CHECK(memcmp(&y->position, &x->position, sizeof(vec3_t)) == 0);
+			CHECK(near_angle(y->angle.y, x->angle.y));
+			CHECK(near(y->velocity.x, x->velocity.x, 0.126f) && near(y->velocity.z, x->velocity.z, 0.126f));
+			CHECK(near(y->timer, x->timer, 0.0051f));
+		}
+		for (int i = 0; i < a.num_droids; i++) {
+			CHECK_EQ_INT(b.droids[i].pilot, a.droids[i].pilot);
+			CHECK_EQ_INT(b.droids[i].tractor, a.droids[i].tractor);
+			CHECK(memcmp(&b.droids[i].position, &a.droids[i].position, sizeof(vec3_t)) == 0);
 		}
 		for (int i = 0; i < a.num_events; i++) {
-			CHECK_EQ_INT(b.events[i].seq, a.events[i].seq);
-			CHECK_EQ_INT(b.events[i].target, a.events[i].target);
-			CHECK(b.events[i].value == a.events[i].value);
+			check_event(&b.events[i], &a.events[i]);
 		}
 	}
 
-	// The worst case snapshot must fit into a single datagram buffer
-	printf("    full snapshot: %d bytes\n", net_encode_snapshot(buf, sizeof(buf), &a));
+	// The worst case: 64 weapons, 48 events, 8 droids; goes out fragmented,
+	// but must still fit into the receive buffer
+	printf("    worst case snapshot: %d bytes\n", net_encode_snapshot(buf, sizeof(buf), &a));
+}
+
+// A busy moment in an 8 player race must fit into one unfragmented datagram
+static void test_snapshot_typical_size(void) {
+	static net_snapshot_t a;
+	static uint8_t buf[NET_MAX_PACKET];
+	fill_snapshot(&a);
+	a.num_weapons = 12;  // a few missiles and a row of mines
+	a.num_droids = 2;    // two rescues at the same time
+	a.num_pickups = 40;
+	a.num_events = 28;   // 8 ships scraping walls (sound + sparks), an explosion or two
+	int len = net_encode_snapshot(buf, sizeof(buf), &a);
+	printf("    busy snapshot: %d bytes (limit %d)\n", len, NET_SNAPSHOT_SAFE_SIZE);
+	CHECK(len > 0 && len <= NET_SNAPSHOT_SAFE_SIZE);
+
+	a.num_weapons = 0;
+	a.num_droids = 0;
+	a.num_events = 0;
+	len = net_encode_snapshot(buf, sizeof(buf), &a);
+	printf("    quiet snapshot: %d bytes\n", len);
+	CHECK(len > 0 && len < 450);
+}
+
+// The values that broke silently in a packed format
+static void test_snapshot_edge_values(void) {
+	static net_snapshot_t a, b;
+	static uint8_t buf[NET_MAX_PACKET];
+	memset(&a, 0, sizeof(a));
+	a.num_ships = 3;
+	a.lap_times_pilot = -1;
+	// The highest ship flag in use (SHIP_SPECIALED is bit 17) and beyond
+	a.ships[0].flags = (1 << 17) | (1 << 23) | 1;
+	a.ships[1].flags = 0xffffffff;
+	// Angles: exactly +-PI, more than one turn, tiny
+	a.ships[0].angle = (vec3_t){(float)M_PI, (float)-M_PI, 7.0f};
+	a.ships[1].angle = (vec3_t){-20.0f, 0.00005f, 3.14f};
+	a.ships[0].weapon_target = -1;
+	a.ships[1].weapon_target = 7;
+	a.ships[0].lap = -1;
+	// Out of range: clamped, not wrapped around
+	a.ships[0].velocity = (vec3_t){1e6f, -1e6f, 0};
+	a.ships[0].speed = 1e6f;
+	a.ships[1].speed = -5;
+	a.ships[0].update_timer = -0.5f;
+	a.ships[1].update_timer = 100.0f;
+	a.ships[2].thrust_mag = 1800;
+
+	int len = net_encode_snapshot(buf, sizeof(buf), &a);
+	CHECK(len > 0);
+	CHECK(net_decode_snapshot(buf, len, &b));
+	CHECK_EQ_INT(b.ships[0].flags, (1 << 17) | (1 << 23) | 1);
+	CHECK_EQ_INT(b.ships[1].flags, 0xffffff);
+	CHECK(near_angle(b.ships[0].angle.x, M_PI) && near_angle(b.ships[0].angle.y, M_PI));
+	CHECK(near_angle(b.ships[0].angle.z, 7.0f));
+	CHECK(near_angle(b.ships[1].angle.x, -20.0f));
+	CHECK(near(b.ships[1].angle.y, 0.00005f, 0.0001f));
+	for (int i = 0; i < 2; i++) {
+		CHECK(b.ships[i].angle.x >= -(float)M_PI && b.ships[i].angle.x < (float)M_PI);
+		CHECK(b.ships[i].angle.z >= -(float)M_PI && b.ships[i].angle.z < (float)M_PI);
+	}
+	CHECK_EQ_INT(b.ships[0].weapon_target, -1);
+	CHECK_EQ_INT(b.ships[1].weapon_target, 7);
+	CHECK_EQ_INT(b.ships[0].lap, -1);
+	CHECK(b.ships[0].velocity.x > 16000 && b.ships[0].velocity.y < -16000);
+	CHECK(b.ships[0].speed == 65535);
+	CHECK(b.ships[1].speed == 0);
+	CHECK(near(b.ships[0].update_timer, -0.5f, 0.001f));
+	CHECK(b.ships[1].update_timer > 32 && b.ships[1].update_timer < 33);
+	CHECK(b.ships[2].thrust_mag == 1800);
+	CHECK_EQ_INT(b.lap_times_pilot, -1);
+
+	// net_quantize_angle() tells the game what the other side gets
+	CHECK(near_angle(net_quantize_angle(2.5f), 2.5f));
+	CHECK(net_quantize(0.3f, 2.0f) == 0.5f);
+
+	// Events must ascend: the encoder refuses anything else instead of
+	// sending sequence numbers the client would misread
+	a.num_events = 2;
+	a.events[0] = (net_event_t){.seq = 100, .type = NET_EVENT_COUNTDOWN, .target = -1};
+	a.events[1] = (net_event_t){.seq = 100, .type = NET_EVENT_COUNTDOWN, .target = -1};
+	CHECK(net_encode_snapshot(buf, sizeof(buf), &a) == 0);
+	a.events[1].seq = 100 + 70000;
+	CHECK(net_encode_snapshot(buf, sizeof(buf), &a) == 0);
+	// ... and wrap around 2^32 like everything else
+	a.events[0].seq = 0xfffffffe;
+	a.events[1].seq = 3;
+	len = net_encode_snapshot(buf, sizeof(buf), &a);
+	CHECK(len > 0);
+	CHECK(net_decode_snapshot(buf, len, &b));
+	CHECK_EQ_INT(b.events[0].seq, 0xfffffffe);
+	CHECK_EQ_INT(b.events[1].seq, 3);
 }
 
 static void test_messages_roundtrip(void) {
@@ -272,9 +439,17 @@ static void test_snapshot_rejects_non_finite(void) {
 	CHECK(len > 0);
 	CHECK(!net_decode_snapshot(buf, len, &b));
 	fill_snapshot(&a);
+	a.events[0].type = NET_EVENT_SFX; // the pitch is sent as a float
 	a.events[0].value = INFINITY;
 	len = net_encode_snapshot(buf, sizeof(buf), &a);
 	CHECK(!net_decode_snapshot(buf, len, &b));
+	// Quantized values can't be non finite: NaN becomes a clamped number
+	fill_snapshot(&a);
+	a.ships[0].velocity.x = NAN;
+	a.ships[0].angle.y = INFINITY;
+	len = net_encode_snapshot(buf, sizeof(buf), &a);
+	CHECK(net_decode_snapshot(buf, len, &b));
+	CHECK(isfinite(b.ships[0].velocity.x) && isfinite(b.ships[0].angle.y));
 }
 
 // Random and mutated packets: the decoders must never read out of bounds or
@@ -745,6 +920,147 @@ static void test_session_ignores_strangers(void) {
 	lan_teardown();
 }
 
+// Pause state goes to the clients with the lobby; snapshots missing during
+// the pause are not a connection problem
+static void test_session_pause(void) {
+	lan_setup(3, 0, 0);
+	pump(0.5, 0.01);
+	CHECK_EQ_INT(count_joined(), 3);
+	net_session_host_start_loading(&lan.host);
+	net_session_host_set_phase(&lan.host, NET_PHASE_RACE);
+	pump(0.2, 0.01);
+
+	int slot = lan.clients[1].my_slot;
+	net_session_host_set_pause(&lan.host, NET_PAUSE_WAITING, 1 << slot, 0);
+	pump(0.2, 0.01);
+	for (int i = 0; i < lan.num_clients; i++) {
+		CHECK_EQ_INT(lan.clients[i].pause, NET_PAUSE_WAITING);
+		CHECK_EQ_INT(lan.clients[i].pause_mask, 1 << slot);
+	}
+
+	// A long wait: the clients don't give up on the host (the lobby keeps
+	// coming), not even the one that was gone
+	lan.frozen[1] = true;
+	pump(NET_TIMEOUT + 5.0, 0.05);
+	CHECK(!lan.host.slots[slot].connected);
+	CHECK(lan.host.slots[slot].used);
+	lan.frozen[1] = false;
+	pump(0.3, 0.01);
+	CHECK(lan.host.slots[slot].connected);
+	CHECK_EQ_INT(lan.clients[1].status, NET_STATUS_OK);
+
+	net_session_host_set_pause(&lan.host, NET_PAUSE_RESUMING, 0, 2.5f);
+	pump(0.2, 0.01);
+	CHECK_EQ_INT(lan.clients[0].pause, NET_PAUSE_RESUMING);
+	CHECK(near(lan.clients[0].pause_timer, 2.5f, 0.011f));
+
+	net_session_host_set_pause(&lan.host, NET_PAUSE_NONE, 0, 0);
+	pump(0.2, 0.01);
+	for (int i = 0; i < lan.num_clients; i++) {
+		CHECK_EQ_INT(lan.clients[i].pause, NET_PAUSE_NONE);
+		CHECK(lan.now - lan.clients[i].snapshot_recv_time < 0.5);
+	}
+
+	// Presses made while frozen don't fire afterwards
+	lan.clients[0].input.presses[7] += 3;
+	pump(0.2, 0.01);
+	net_session_host_reset_presses(&lan.host);
+	net_session_host_latch_presses(&lan.host);
+	CHECK(!lan.host.slots[lan.clients[0].my_slot].pressed[7]);
+	lan_teardown();
+}
+
+// A client that is gone during a race waits longer for the host than in
+// the lobby: the host may have paused the race for somebody
+static void test_session_client_race_timeout(void) {
+	lan_setup(1, 0, 0);
+	pump(0.5, 0.01);
+	net_session_host_start_loading(&lan.host);
+	net_session_host_set_phase(&lan.host, NET_PHASE_RACE);
+	pump(0.2, 0.01);
+	lan.host_frozen = true;
+	pump(NET_TIMEOUT + 2.0, 0.1);
+	CHECK_EQ_INT(lan.clients[0].status, NET_STATUS_OK);
+	pump(NET_TIMEOUT_RACE_CLIENT - NET_TIMEOUT, 0.1);
+	CHECK_EQ_INT(lan.clients[0].status, NET_STATUS_HOST_LOST);
+	lan_teardown();
+}
+
+// A player who says goodbye during a race is out for good, even if a late
+// packet of theirs arrives
+static void test_session_leave_in_race(void) {
+	lan_setup(2, 0, 0);
+	pump(0.5, 0.01);
+	net_session_host_start_loading(&lan.host);
+	net_session_host_set_phase(&lan.host, NET_PHASE_RACE);
+	pump(0.2, 0.01);
+	int slot = lan.clients[0].my_slot;
+	net_addr_t addr = lan.host.slots[slot].addr;
+
+	// A client state from before the goodbye, delivered after it
+	uint8_t late[256];
+	net_msg_client_state_t cs;
+	memset(&cs, 0, sizeof(cs));
+	cs.session = lan.host.session;
+	cs.nonce = lan.clients[0].nonce;
+	int late_len = net_encode_client_state(late, sizeof(late), &cs);
+
+	net_session_close(&lan.clients[0]);
+	lan.frozen[0] = true;
+	pump(0.2, 0.01);
+	CHECK(lan.host.slots[slot].used);
+	CHECK(lan.host.slots[slot].left);
+	CHECK(!lan.host.slots[slot].connected);
+
+	net_socket_t sock;
+	CHECK(net_socket_open(&sock, 0, false));
+	(void)addr;
+	net_socket_send(&sock, (net_addr_t){.ip = NET_ADDR_LOOPBACK, .port = lan.host.port}, late, late_len);
+	pump(0.2, 0.01);
+	CHECK(!lan.host.slots[slot].connected);
+	net_socket_close(&sock);
+	lan_teardown();
+}
+
+// An older game: it finds the host and is told why it can't join
+static void test_session_other_version(void) {
+	lan_setup(0, 0, 0);
+	pump(0.1, 0.01);
+	net_socket_t sock;
+	CHECK(net_socket_open(&sock, 0, false));
+	net_addr_t host = {.ip = NET_ADDR_LOOPBACK, .port = lan.host.port};
+	uint8_t old_version = NET_PROTOCOL_VERSION - 1;
+
+	// DISCOVER of version 1: header only
+	uint8_t pkt[64] = {NET_PROTOCOL_MAGIC & 0xff, NET_PROTOCOL_MAGIC >> 8, old_version, NET_MSG_DISCOVER};
+	net_socket_send(&sock, host, pkt, 4);
+	pump(0.05, 0.01);
+	uint8_t in[256];
+	net_addr_t from;
+	int len = 0;
+	for (int t = 0; t < 50 && len <= 0; t++) {
+		len = net_socket_recv(&sock, in, sizeof(in), &from);
+		sleep_ms(1);
+	}
+	CHECK(len == 4 + 4 + 3 + NET_NAME_LEN); // the v1 HOST_INFO
+	CHECK(len > 3 && in[2] == old_version && in[3] == NET_MSG_HOST_INFO);
+
+	// JOIN of version 1: a REJECT "version" it can read
+	pkt[3] = NET_MSG_JOIN;
+	net_socket_send(&sock, host, pkt, 4 + 4 + 1 + NET_NAME_LEN);
+	pump(0.05, 0.01);
+	len = 0;
+	for (int t = 0; t < 50 && len <= 0; t++) {
+		len = net_socket_recv(&sock, in, sizeof(in), &from);
+		sleep_ms(1);
+	}
+	CHECK_EQ_INT(len, 5);
+	CHECK(len == 5 && in[2] == old_version && in[3] == NET_MSG_REJECT && in[4] == NET_REJECT_VERSION);
+	CHECK_EQ_INT(net_session_num_players(&lan.host), 1);
+	net_socket_close(&sock);
+	lan_teardown();
+}
+
 static void test_discovery(void) {
 	lan_setup(0, 0, 0);
 	net_session_t finder;
@@ -790,6 +1106,8 @@ int main(int argc, char **argv) {
 	run_test("messages round trip", test_messages_roundtrip);
 	run_test("player names", test_names);
 	run_test("snapshot round trip", test_snapshot_roundtrip);
+	run_test("snapshot size", test_snapshot_typical_size);
+	run_test("snapshot edge values", test_snapshot_edge_values);
 	run_test("snapshot rejects NaN / inf", test_snapshot_rejects_non_finite);
 	run_test("fuzzed decoders", test_fuzz_decoders);
 
@@ -797,6 +1115,10 @@ int main(int argc, char **argv) {
 	run_test("8 players: slots, pilots, lobby full", test_session_eight_players);
 	run_test("pilot change", test_session_pilot_change);
 	run_test("race handshake + snapshots with 10% loss", test_session_race_handshake);
+	run_test("pause and resume", test_session_pause);
+	run_test("client waits longer for the host in a race", test_session_client_race_timeout);
+	run_test("goodbye in a race is final", test_session_leave_in_race);
+	run_test("older game version gets an answer", test_session_other_version);
 	run_test("button presses with 25% loss", test_session_presses_survive_loss);
 	run_test("time outs, rejoin, host lost", test_session_timeouts);
 	run_test("leave, join during a race, host ends", test_session_leave_and_join_in_race);

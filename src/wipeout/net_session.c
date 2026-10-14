@@ -163,6 +163,9 @@ static void net_host_send_lobby_to(net_session_t *s, net_addr_t to, int slot_ind
 	m.race_class = s->race_class;
 	m.circuit = s->circuit;
 	m.your_slot = slot_index;
+	m.pause = s->pause;
+	m.pause_mask = s->pause_mask;
+	m.pause_timer = s->pause_timer;
 	for (int i = 0; i < NET_MAX_PLAYERS; i++) {
 		net_slot_t *src = &s->slots[i];
 		net_slot_info_t *dst = &m.slots[i];
@@ -200,6 +203,34 @@ static void net_host_reject(net_session_t *s, net_addr_t to, net_reject_t reason
 	net_send(s, to, buf, net_encode_reject(buf, sizeof(buf), &m));
 }
 
+static void net_host_fill_info(net_session_t *s, net_msg_host_info_t *info) {
+	memset(info, 0, sizeof(*info));
+	info->session = s->session;
+	info->phase = s->phase;
+	info->num_players = net_session_num_players(s);
+	info->max_players = NET_MAX_PLAYERS;
+	net_copy_name(info->name, s->slots[0].name);
+}
+
+// A game with another protocol version: it can't play with us, but it should
+// see us and say why it can't join
+static void net_host_handle_other_version(net_session_t *s, net_addr_t from, const uint8_t *buf, int len) {
+	int version = net_peek_version(buf, len);
+	if (version < 0 || version == NET_PROTOCOL_VERSION) {
+		return;
+	}
+	uint8_t out[128];
+	if (buf[3] == NET_MSG_DISCOVER) {
+		net_msg_host_info_t info;
+		net_host_fill_info(s, &info);
+		net_send(s, from, out, net_encode_host_info_version(out, sizeof(out), version, &info));
+	}
+	else if (buf[3] == NET_MSG_JOIN) {
+		net_msg_reject_t m = {.reason = NET_REJECT_VERSION};
+		net_send(s, from, out, net_encode_reject_version(out, sizeof(out), version, &m));
+	}
+}
+
 static int net_host_find_slot(net_session_t *s, uint32_t nonce) {
 	for (int i = 1; i < NET_MAX_PLAYERS; i++) {
 		if (s->slots[i].used && s->slots[i].nonce == nonce) {
@@ -216,7 +247,7 @@ static void net_host_handle_join(net_session_t *s, net_addr_t from, const net_ms
 		net_slot_t *slot = &s->slots[index];
 		slot->addr = from;
 		slot->last_recv = s->now;
-		if (!slot->connected) {
+		if (!slot->connected && !slot->left) {
 			slot->connected = true;
 		}
 		s->lobby_dirty = true;
@@ -261,6 +292,9 @@ static void net_host_handle_client_state(net_session_t *s, net_addr_t from, cons
 		return;
 	}
 	net_slot_t *slot = &s->slots[index];
+	if (slot->left) {
+		return; // a late packet after the goodbye
+	}
 	slot->addr = from;
 	slot->last_recv = s->now;
 	if (!slot->connected) {
@@ -309,12 +343,7 @@ static void net_host_handle_packet(net_session_t *s, net_addr_t from, const uint
 	switch (net_peek_type(buf, len)) {
 		case NET_MSG_DISCOVER: {
 			net_msg_host_info_t info;
-			memset(&info, 0, sizeof(info));
-			info.session = s->session;
-			info.phase = s->phase;
-			info.num_players = net_session_num_players(s);
-			info.max_players = NET_MAX_PLAYERS;
-			net_copy_name(info.name, s->slots[0].name);
+			net_host_fill_info(s, &info);
 			uint8_t out[128];
 			net_send(s, from, out, net_encode_host_info(out, sizeof(out), &info));
 			break;
@@ -344,16 +373,20 @@ static void net_host_handle_packet(net_session_t *s, net_addr_t from, const uint
 			if (net_decode_leave(buf, len, &m) && m.session == s->session) {
 				// Sent several times; only the first one counts
 				int index = net_host_find_slot(s, m.nonce);
-				if (index >= 0 && s->slots[index].connected) {
+				if (index >= 0 && !s->slots[index].left) {
 					net_host_drop_slot(s, index);
+					if (s->slots[index].used) {
+						s->slots[index].left = true; // in a race: the slot stays
+					}
 				}
 			}
 			break;
 		}
 		default:
-			// Some other host's traffic, or garbage
+			// Some other host's traffic, another version, or garbage
 			if (net_peek_type(buf, len) == 0) {
 				s->stats.malformed++;
+				net_host_handle_other_version(s, from, buf, len);
 			}
 			break;
 	}
@@ -422,6 +455,22 @@ void net_session_host_set_results(net_session_t *s, const net_result_t *results,
 	s->num_results = num < NET_MAX_SHIPS ? num : NET_MAX_SHIPS;
 	memcpy(s->results, results, sizeof(net_result_t) * s->num_results);
 	s->lobby_dirty = true;
+}
+
+void net_session_host_set_pause(net_session_t *s, net_pause_t pause, uint8_t mask, float timer) {
+	if (s->pause != pause || s->pause_mask != mask) {
+		s->lobby_dirty = true;
+	}
+	s->pause = pause;
+	s->pause_mask = mask;
+	s->pause_timer = timer;
+}
+
+void net_session_host_reset_presses(net_session_t *s) {
+	for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+		memcpy(s->slots[i].presses_seen, s->slots[i].input.presses, NET_NUM_ACTIONS);
+		memset(s->slots[i].pressed, 0, sizeof(s->slots[i].pressed));
+	}
 }
 
 bool net_session_host_all_ready(net_session_t *s) {
@@ -593,6 +642,13 @@ static void net_client_handle_lobby(net_session_t *s, const net_msg_lobby_t *m) 
 	s->race_id = m->race_id;
 	s->race_class = m->race_class;
 	s->circuit = m->circuit;
+	if (s->pause != NET_PAUSE_NONE && m->pause == NET_PAUSE_NONE) {
+		// No snapshots came during the pause; that wasn't a connection problem
+		s->snapshot_recv_time = s->now;
+	}
+	s->pause = m->pause;
+	s->pause_mask = m->pause_mask;
+	s->pause_timer = m->pause_timer;
 	for (int i = 0; i < NET_MAX_PLAYERS; i++) {
 		net_slot_t *slot = &s->slots[i];
 		const net_slot_info_t *info = &m->slots[i];
@@ -673,7 +729,7 @@ static void net_client_handle_packet(net_session_t *s, net_addr_t from, const ui
 					s->stats.snapshots_missed += gap - 1;
 				}
 				double since = s->now - s->snapshot_recv_time;
-				if (s->phase == NET_PHASE_RACE && since > s->stats.snapshot_max_gap) {
+				if (s->phase == NET_PHASE_RACE && s->pause == NET_PAUSE_NONE && since > s->stats.snapshot_max_gap) {
 					s->stats.snapshot_max_gap = since;
 				}
 			}
@@ -716,7 +772,10 @@ static void net_client_update(net_session_t *s) {
 		return;
 	}
 
-	double timeout = s->phase == NET_PHASE_LOADING ? NET_TIMEOUT_LOADING : NET_TIMEOUT;
+	double timeout =
+		s->phase == NET_PHASE_LOADING ? NET_TIMEOUT_LOADING :
+		s->phase == NET_PHASE_RACE ? NET_TIMEOUT_RACE_CLIENT :
+		NET_TIMEOUT;
 	if (s->now - s->last_host_recv > timeout) {
 		s->status = NET_STATUS_HOST_LOST;
 		return;

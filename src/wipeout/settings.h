@@ -28,6 +28,7 @@ typedef struct {
 	int draw_distance; // 0..3: FULL, FAR, MEDIUM, NEAR
 
 	int net_pilot; // preferred pilot in LAN games
+	bool net_drop_pause; // LAN host: a player drops out: pause the race (or let the AI drive)
 
 	int graphics_preset; // graphics_preset_t
 

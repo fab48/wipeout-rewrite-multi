@@ -1280,6 +1280,13 @@ static void button_lan_start(menu_t *menu, int data) {
 	netplay_host_start_race();
 }
 
+static const char *lan_dropout_names[] = {"AUTOPILOT", "PAUSE"};
+
+static void toggle_lan_dropout(menu_t *menu, int data) {
+	settings.net_drop_pause = data;
+	settings_set_dirty();
+}
+
 static void page_lan_lobby_draw(menu_t *menu, int data) {
 	if (!netplay_active()) {
 		menu_pop(menu);
@@ -1368,6 +1375,7 @@ static void page_lan_lobby_init(menu_t *menu) {
 		if (lan_circuits_len > 0) {
 			menu_page_add_toggle(page, lan_circuit_index(net.circuit), "CIRCUIT", lan_circuit_names, lan_circuits_len, toggle_lan_circuit);
 		}
+		menu_page_add_toggle(page, settings.net_drop_pause ? 1 : 0, "PLAYER LOST", lan_dropout_names, len(lan_dropout_names), toggle_lan_dropout);
 	}
 	menu_page_add_toggle(page, settings.net_pilot % NUM_PILOTS, "PILOT", lan_pilot_names, len(lan_pilot_names), toggle_lan_pilot);
 }
