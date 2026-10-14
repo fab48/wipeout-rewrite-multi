@@ -54,6 +54,7 @@ static struct {
 	bool results_shown;
 	double last_snapshot_time;
 	droid_t remote_droids[NET_MAX_PLAYERS];
+	bool on_autopilot[NET_MAX_PLAYERS]; // host: dropped out during this race
 	menu_t *menu;
 
 	// Events, host
@@ -69,6 +70,10 @@ static struct {
 } np;
 
 #define NETPLAY_EVENT_WINDOW 0.35
+#define NETPLAY_MAX_EXTRAPOLATE 0.25 // keep moving through short Wi-Fi hiccups
+
+// Larger UDP packets get fragmented; on Wi-Fi losing one fragment loses all
+#define NETPLAY_SNAPSHOT_SAFE_SIZE 1400
 
 
 // -----------------------------------------------------------------------------
@@ -763,6 +768,7 @@ void netplay_race_init(void) {
 		return;
 	}
 	np.first_finish_time = 0;
+	memset(np.on_autopilot, 0, sizeof(np.on_autopilot));
 	np.results_shown = false;
 	np.finished_shown = false;
 	np.last_snapshot_time = 0;
@@ -953,12 +959,26 @@ void netplay_host_race_update_begin(void) {
 	// Players that dropped out: their ship continues on autopilot
 	for (int i = 1; i < NET_MAX_PLAYERS; i++) {
 		net_slot_t *slot = &net.slots[i];
+		ship_t *ship = &g.ships[slot->pilot];
 		if (slot->used && !slot->connected) {
-			ship_t *ship = &g.ships[slot->pilot];
 			if (flags_is(ship->flags, SHIP_RACING)) {
 				printf("net: %s dropped out, the ship goes on autopilot\n", slot->name);
 				race_release_ship(ship);
+				np.on_autopilot[i] = true;
 			}
+		}
+		else if (slot->used && np.on_autopilot[i] && np.race_running) {
+			// Back after a Wi-Fi outage: hand the ship back if still racing
+			np.on_autopilot[i] = false;
+			if (ship->lap < NUM_LAPS && ship->max_lap < NUM_LAPS && flags_not(ship->flags, SHIP_RACING)) {
+				printf("net: %s is back\n", slot->name);
+				flags_add(ship->flags, SHIP_RACING);
+				ship->remote_thrust_max = 2900;
+				ship->remote_thrust_mag = 46;
+			}
+		}
+		else if (!slot->used) {
+			np.on_autopilot[i] = false;
 		}
 	}
 }
@@ -1039,6 +1059,14 @@ static void netplay_host_send_snapshot(void) {
 	}
 
 	int len = net_encode_snapshot(buf, sizeof(buf), &snap);
+	// Too big for one datagram: shed the oldest events, they were already
+	// repeated in earlier snapshots
+	while (len > NETPLAY_SNAPSHOT_SAFE_SIZE && snap.num_events > 0) {
+		int drop = (snap.num_events + 1) / 2;
+		memmove(snap.events, snap.events + drop, sizeof(net_event_t) * (snap.num_events - drop));
+		snap.num_events -= drop;
+		len = net_encode_snapshot(buf, sizeof(buf), &snap);
+	}
 	if (len) {
 		net_session_host_send_snapshot(&net, buf, len);
 	}
@@ -1111,7 +1139,7 @@ static vec3_t netplay_angle_diff(vec3_t a, vec3_t b) {
 }
 
 static void netplay_track_predict(netplay_ship_track_t *t, double now, vec3_t *pos, vec3_t *angle) {
-	float age = clamp(now - t->recv_time, 0.0, 0.1);
+	float age = clamp(now - t->recv_time, 0.0, NETPLAY_MAX_EXTRAPOLATE);
 	*pos = vec3_add(t->state.position, vec3_mulf(t->pos_rate, age));
 	*angle = vec3_add(t->state.angle, vec3_mulf(t->angle_rate, age));
 }
@@ -1223,7 +1251,7 @@ static void netplay_client_update_ship(int i, double now, float tick) {
 	ship->position = vec3_add(pos, t->pos_error);
 	ship->angle = vec3_wrap_angle(vec3_add(angle, t->angle_error));
 
-	float age = clamp(now - t->recv_time, 0.0, 0.1);
+	float age = clamp(now - t->recv_time, 0.0, NETPLAY_MAX_EXTRAPOLATE);
 	bool local = ship_is_local_player(ship);
 	int flags = s->flags;
 	if (local) {

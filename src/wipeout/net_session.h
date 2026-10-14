@@ -18,9 +18,9 @@
 
 #define NET_LOBBY_SEND_INTERVAL   0.1
 #define NET_CLIENT_SEND_INTERVAL_LOBBY 0.1
-#define NET_CLIENT_SEND_INTERVAL_RACE  (1.0/90.0)
+#define NET_CLIENT_SEND_INTERVAL_RACE  (1.0/60.0) // Wi-Fi: every packet costs airtime
 #define NET_DISCOVER_INTERVAL     1.0
-#define NET_TIMEOUT               8.0
+#define NET_TIMEOUT               20.0 // Wi-Fi on old laptops can stall for seconds (scans, power save)
 #define NET_TIMEOUT_LOADING       45.0 // loading a track with the xBR upscale can take a while
 #define NET_FOUND_HOST_EXPIRE     3.5
 #define NET_MAX_FOUND_HOSTS       8

@@ -22,7 +22,7 @@
 #define ship_is_remote_player(SHIP) ((SHIP)->player >= NETPLAY_REMOTE_PLAYER)
 
 // Snapshots per second sent by the host
-#define NETPLAY_SNAPSHOT_RATE 60.0
+#define NETPLAY_SNAPSHOT_RATE 30.0 // the client extrapolates; 60 Hz to 7 clients saturates Wi-Fi
 
 // After the first human crossed the line, the others have this long to finish
 #define NETPLAY_FINISH_GRACE_TIME 45.0
