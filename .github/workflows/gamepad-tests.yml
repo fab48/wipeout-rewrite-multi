@@ -1,0 +1,20 @@
+# Two virtual Xbox pads through the SDL event code and input.c. Needs SDL >=
+# 2.24 for virtual game controllers (Ubuntu 24.04 has 2.30).
+name: gamepad-tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Build (with address and undefined behaviour sanitizers)
+        run: make gamepad_test GAMEPAD_TEST_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+      - name: Run
+        run: ./gamepad-test

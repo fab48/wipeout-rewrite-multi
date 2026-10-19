@@ -199,6 +199,9 @@ uint8_t input_bound_to_action(button_t button);
 // fixed bindings (left stick steers) and can't be assigned in the menu.
 bool input_is_stick_direction(button_t button);
 
+// 0 for a gamepad 1 button, 1 for gamepad 2, -1 for anything else
+int input_button_gamepad(button_t button);
+
 void input_set_button_state(button_t button, float state);
 void input_set_gamepad_swap(bool swap);
 
@@ -224,6 +227,7 @@ const char *input_button_to_name(button_t button);
 #define INPUT_ACTION_COMMAND 31
 #define INPUT_ACTION_MAX 32
 #define INPUT_DEADZONE 0.1
+#define INPUT_DEADZONE_STICK 0.24 // XInput's recommended left stick dead zone (7849)
 #define INPUT_DEADZONE_CAPTURE 0.5
 #define INPUT_ACTION_NONE 255
 #define INPUT_BUTTON_NONE 0

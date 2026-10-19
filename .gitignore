@@ -13,6 +13,8 @@
 /wipegame-headless.exe
 /net-test
 /net-test.exe
+/gamepad-test
+/gamepad-test.exe
 /lan.txt
 /settings.txt
 /controls2.dat

@@ -165,7 +165,6 @@ static const char *button_names[INPUT_BUTTON_MAX] = {
 	[INPUT_GAMEPAD2_R_STICK_DOWN] = "2RSTKDOWN",
 	[INPUT_GAMEPAD2_R_STICK_LEFT] = "2RSTKLEFT",
 	[INPUT_GAMEPAD2_R_STICK_RIGHT] = "2RSTKRIGHT",
-	NULL,
 	[INPUT_MOUSE_LEFT] = "MLEFT",
 	[INPUT_MOUSE_MIDDLE] = "MMIDDLE",
 	[INPUT_MOUSE_RIGHT] = "MRIGHT",
@@ -177,7 +176,14 @@ static float actions_state[INPUT_ACTION_MAX];
 static bool actions_pressed[INPUT_ACTION_MAX];
 static bool actions_released[INPUT_ACTION_MAX];
 
-static uint8_t expected_button[INPUT_ACTION_MAX];
+// Every button as the platform reports it, before the gamepad swap. The state
+// of an action is worked out from all the buttons bound to it (the highest
+// one wins), so it can't get stuck. It used to be held by the one button that
+// pressed it: when the release of that button got lost (ignored by the player
+// filter, or coming from the other gamepad after SWAP GAMEPADS), the action
+// stayed on and no other button could press or release it any more, until
+// the controls were rebound or the game restarted.
+static float buttons_state[INPUT_BUTTON_MAX];
 static uint8_t bindings[INPUT_LAYER_MAX][INPUT_BUTTON_MAX];
 
 static input_capture_callback_t capture_callback;
@@ -186,7 +192,12 @@ static void *capture_user;
 static int32_t mouse_x;
 static int32_t mouse_y;
 
+static bool gamepad_swap = false;
+static int player_filter = -1;
+static uint8_t player2_action_min = 0, player2_action_max = 0;
+
 void input_init(void) {
+	clear(buttons_state);
 	input_unbind_all(INPUT_LAYER_SYSTEM);
 	input_unbind_all(INPUT_LAYER_USER);
 }
@@ -200,46 +211,27 @@ void input_clear(void) {
 	clear(actions_released);
 }
 
-void input_set_layer_button_state(input_layer_t layer, button_t button, float state) {
-	error_if(layer < 0 || layer >= INPUT_LAYER_MAX, "Invalid input layer %d", layer);
-
-	uint8_t action = bindings[layer][button];
-	if (action == INPUT_ACTION_NONE) {
-		return;
+int input_button_gamepad(button_t button) {
+	if (button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT) {
+		return 0;
 	}
-
-	uint8_t expected = expected_button[action];
-	if (!expected || expected == button) {
-		state = (state > INPUT_DEADZONE) ? state : 0;
-
-		if (state && !actions_state[action]) {
-			actions_pressed[action] = true;
-			expected_button[action] = button;
-		}
-		else if (!state && actions_state[action]) {
-			actions_released[action] = true;
-			expected_button[action] = INPUT_BUTTON_NONE;
-		}
-		actions_state[action] = state;
+	if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
+		return 1;
 	}
+	return -1;
 }
 
-static bool gamepad_swap = false;
-static int player_filter = -1;
-static uint8_t player2_action_min = 0, player2_action_max = 0;
-
-void input_set_gamepad_swap(bool swap) {
-	gamepad_swap = swap;
-}
-
-void input_set_player_filter(int player, uint8_t p2_action_min, uint8_t p2_action_max) {
-	if (player != player_filter) {
-		// Don't leave anything stuck when we start ignoring a device
-		input_clear();
+// Gamepad 1 <-> gamepad 2; the same in both directions
+static button_t input_swap_gamepads(button_t button) {
+	if (gamepad_swap) {
+		if (input_button_gamepad(button) == 0) {
+			return button + INPUT_GAMEPAD2_OFFSET;
+		}
+		else if (input_button_gamepad(button) == 1) {
+			return button - INPUT_GAMEPAD2_OFFSET;
+		}
 	}
-	player_filter = player;
-	player2_action_min = p2_action_min;
-	player2_action_max = p2_action_max;
+	return button;
 }
 
 static bool input_button_belongs_to_player2(button_t button) {
@@ -253,36 +245,102 @@ static bool input_button_belongs_to_player2(button_t button) {
 	return false;
 }
 
+// Menus for one player only (team/pilot selection in split screen): the
+// other player's gamepad is ignored. The keyboard is shared and always
+// goes through, or a player without a gamepad could get stuck.
+static bool input_button_filtered(button_t button) {
+	if (player_filter < 0) {
+		return false;
+	}
+	bool is_gamepad1 = button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT;
+	bool is_gamepad2 = input_button_belongs_to_player2(button) && button >= INPUT_GAMEPAD2_A;
+	return (player_filter == 0 && is_gamepad2) || (player_filter == 1 && is_gamepad1);
+}
+
+// State of a button as the game sees it (after the gamepad swap, the player
+// filter and the dead zone)
+static float input_button_state(button_t button) {
+	if (input_button_filtered(button)) {
+		return 0;
+	}
+	float state = buttons_state[input_swap_gamepads(button)];
+
+	// Worn sticks don't come back to the center: 10% was not enough, a stick
+	// resting a bit off held a menu direction (the d-pad and the keyboard
+	// could no longer press it) and steered a little. Rescaled, so that the
+	// stick still starts from 0 out of the dead zone.
+	if (input_is_stick_direction(button)) {
+		return state > INPUT_DEADZONE_STICK
+			? (state - INPUT_DEADZONE_STICK) / (1.0 - INPUT_DEADZONE_STICK)
+			: 0;
+	}
+	return state > INPUT_DEADZONE ? state : 0;
+}
+
+// Work out the state of an action from its buttons. may_press is false when
+// the state changes without a button being pressed (filter, swap, binding):
+// a button that was already held then has to be pressed again.
+static void input_update_action(uint8_t action, bool may_press) {
+	if (action == INPUT_ACTION_NONE) {
+		return;
+	}
+
+	float state = 0;
+	for (int layer = 0; layer < INPUT_LAYER_MAX; layer++) {
+		for (int button = 0; button < INPUT_BUTTON_MAX; button++) {
+			if (bindings[layer][button] == action) {
+				state = max(state, input_button_state(button));
+			}
+		}
+	}
+
+	if (state && !actions_state[action] && may_press) {
+		actions_pressed[action] = true;
+	}
+	else if (!state && actions_state[action]) {
+		actions_released[action] = true;
+	}
+	actions_state[action] = state;
+}
+
+static void input_update_all_actions(void) {
+	for (int action = 0; action < INPUT_ACTION_MAX; action++) {
+		input_update_action(action, false);
+	}
+}
+
+void input_set_gamepad_swap(bool swap) {
+	if (swap != gamepad_swap) {
+		gamepad_swap = swap;
+		input_update_all_actions();
+	}
+}
+
+void input_set_player_filter(int player, uint8_t p2_action_min, uint8_t p2_action_max) {
+	player2_action_min = p2_action_min;
+	player2_action_max = p2_action_max;
+	if (player != player_filter) {
+		// What the device we start ignoring holds is released
+		player_filter = player;
+		input_update_all_actions();
+	}
+}
+
 void input_set_button_state(button_t button, float state) {
 	error_if(button < 0 || button >= INPUT_BUTTON_MAX, "Invalid input button %d", button);
 
-	// Gamepad 1 <-> gamepad 2
-	if (gamepad_swap) {
-		if (button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT) {
-			button += INPUT_GAMEPAD2_OFFSET;
-		}
-		else if (button >= INPUT_GAMEPAD2_A && button <= INPUT_GAMEPAD2_R_STICK_RIGHT) {
-			button -= INPUT_GAMEPAD2_OFFSET;
-		}
-	}
+	float previous = buttons_state[button];
+	buttons_state[button] = state;
 
-	// Menus for one player only (team/pilot selection in split screen): the
-	// other player's gamepad is ignored. The keyboard is shared and always
-	// goes through, or a player without a gamepad could get stuck.
-	if (player_filter >= 0 && !capture_callback) {
-		bool is_gamepad1 = button >= INPUT_GAMEPAD_A && button <= INPUT_GAMEPAD_R_STICK_RIGHT;
-		bool is_gamepad2 = input_button_belongs_to_player2(button) && button >= INPUT_GAMEPAD2_A;
-		if ((player_filter == 0 && is_gamepad2) || (player_filter == 1 && is_gamepad1)) {
-			return;
-		}
-	}
+	button_t game_button = input_swap_gamepads(button);
+	input_update_action(bindings[INPUT_LAYER_SYSTEM][game_button], true);
+	input_update_action(bindings[INPUT_LAYER_USER][game_button], true);
 
-	input_set_layer_button_state(INPUT_LAYER_SYSTEM, button, state);
-	input_set_layer_button_state(INPUT_LAYER_USER, button, state);
-
+	// The capture gets everything, the player filter doesn't apply; only new
+	// presses, not a trigger or a key that was already held
 	if (capture_callback) {
-		if (state > INPUT_DEADZONE_CAPTURE) {
-			capture_callback(capture_user, button, 0);
+		if (state > INPUT_DEADZONE_CAPTURE && previous <= INPUT_DEADZONE_CAPTURE) {
+			capture_callback(capture_user, game_button, 0);
 		}
 	}
 }
@@ -313,9 +371,10 @@ void input_bind(input_layer_t layer, button_t button, uint8_t action) {
 	error_if(action < 0 || action >= INPUT_ACTION_MAX, "Invalid input action %d", action);
 	error_if(layer < 0 || layer >= INPUT_LAYER_MAX, "Invalid input layer %d", layer);
 
-	actions_state[action] = 0;
+	uint8_t previous = bindings[layer][button];
 	bindings[layer][button] = action;
-	clear(expected_button);
+	input_update_action(previous, false);
+	input_update_action(action, false);
 }
 
 bool input_is_stick_direction(button_t button) {
@@ -333,7 +392,9 @@ void input_unbind(input_layer_t layer, button_t button) {
 	error_if(layer < 0 || layer >= INPUT_LAYER_MAX, "Invalid input layer %d", layer);
 	error_if(button < 0 || button >= INPUT_BUTTON_MAX, "Invalid input button %d", button);
 
+	uint8_t previous = bindings[layer][button];
 	bindings[layer][button] = INPUT_ACTION_NONE;
+	input_update_action(previous, false);
 }
 
 void input_unbind_all(input_layer_t layer) {

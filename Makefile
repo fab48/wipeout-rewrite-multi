@@ -165,6 +165,12 @@ NET_TEST_FLAGS ?=
 net_test: $(NET_TEST_SRC)
 	$(CC) -Isrc -std=gnu99 -Wall -O1 -g $(NET_TEST_FLAGS) $(NET_TEST_SRC) -o net-test -lm $(if $(filter Msys,$(shell uname -o)),-lws2_32,)
 
+# Two virtual Xbox pads through the SDL event code and input.c (SDL >= 2.24)
+GAMEPAD_TEST_SRC = tests/gamepad_test.c src/input.c src/utils.c src/mem.c
+GAMEPAD_TEST_FLAGS ?=
+gamepad_test: $(GAMEPAD_TEST_SRC) src/platform_sdl.c
+	$(CC) -Isrc -std=gnu99 -Wall -Wno-unused-variable -Wno-unused-function -O1 -g -DRENDERER_GL $(GAMEPAD_TEST_FLAGS) $(shell sdl2-config --cflags) $(GAMEPAD_TEST_SRC) -o gamepad-test $(shell sdl2-config --libs) -lm
+
 sokol: $(BUILD_DIR)/src/platform_sokol.o
 sokol: $(COMMON_OBJ)
 	$(CC) $^ -o $(TARGET_NATIVE) $(L_FLAGS) $(L_FLAGS_SOKOL)

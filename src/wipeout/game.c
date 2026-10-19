@@ -847,12 +847,16 @@ static void *global_mem_mark = 0;
 static uint8_t default_buttons_p1[NUM_GAME_ACTIONS][2];
 static uint8_t default_buttons_p2[NUM_GAME_ACTIONS][2];
 
-// Replace stick directions in a loaded button table by the default button of
-// that slot (or nothing, if that button is already used by another action)
-static void game_sanitize_buttons(uint8_t buttons[NUM_GAME_ACTIONS][2], uint8_t defaults[NUM_GAME_ACTIONS][2], bool *is_dirty) {
+// Replace stick directions and buttons of the other player's gamepad (both
+// could be captured in the controls menu by earlier versions) in a loaded
+// button table by the default button of that slot (or nothing, if that
+// button is already used by another action)
+static void game_sanitize_buttons(uint8_t buttons[NUM_GAME_ACTIONS][2], uint8_t defaults[NUM_GAME_ACTIONS][2], int player, bool *is_dirty) {
 	for (int action = 0; action < NUM_GAME_ACTIONS; action++) {
 		for (int i = 0; i < 2; i++) {
-			if (!input_is_stick_direction(buttons[action][i])) {
+			int gamepad = input_button_gamepad(buttons[action][i]);
+			bool other_gamepad = gamepad != -1 && gamepad != player;
+			if (!input_is_stick_direction(buttons[action][i]) && !other_gamepad) {
 				continue;
 			}
 			uint8_t replacement = defaults[action][i];
@@ -861,7 +865,8 @@ static void game_sanitize_buttons(uint8_t buttons[NUM_GAME_ACTIONS][2], uint8_t 
 					replacement = INPUT_INVALID;
 				}
 			}
-			printf("controls: removed stick binding from action %d\n", action);
+			const char *name = input_button_to_name(buttons[action][i]);
+			printf("controls: player %d, action %d: removed %s\n", player + 1, action, name ? name : "?");
 			buttons[action][i] = replacement;
 			*is_dirty = true;
 		}
@@ -972,8 +977,9 @@ void game_init(void) {
 	// Saves from earlier versions may have a stick direction bound to some
 	// action (captured by accident in the controls menu). That direction then
 	// no longer steered, e.g. the ship wouldn't turn right with the stick.
-	// Put the default button back in those slots.
-	game_sanitize_buttons(save.buttons, default_buttons_p1, &save.is_dirty);
+	// Or a button of the other player's gamepad. Put the default button back
+	// in those slots.
+	game_sanitize_buttons(save.buttons, default_buttons_p1, 0, &save.is_dirty);
 
 	// User defined, loaded from the save struct
 	for (int action = 0; action < len(save.buttons); action++) {
@@ -1009,7 +1015,7 @@ void game_init(void) {
 		}
 		mem_temp_free(save2_file);
 	}
-	game_sanitize_buttons(save2.buttons, default_buttons_p2, &save2.is_dirty);
+	game_sanitize_buttons(save2.buttons, default_buttons_p2, 1, &save2.is_dirty);
 	game_bind_player2_controls();
 
 	// The left stick of the second gamepad always steers, it can't be bound

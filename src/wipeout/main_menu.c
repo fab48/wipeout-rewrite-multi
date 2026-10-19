@@ -206,6 +206,15 @@ void button_capture(void *user, button_t button, int32_t ascii_char) {
 		return;
 	}
 
+	// Each player's joystick column only takes that player's gamepad. With
+	// two pads, a button of the other one (pad 1 used to get to the player 2
+	// page) got bound to the wrong player, and was taken away from the
+	// player who had it.
+	int gamepad = input_button_gamepad(button);
+	if (gamepad != -1 && gamepad != control_current_player) {
+		return;
+	}
+
 	menu_t *menu = (menu_t *)user;
 	if (button == INPUT_KEY_ESCAPE) {
 		input_capture(NULL, NULL);
@@ -249,6 +258,8 @@ static void page_options_control_set_draw(menu_t *menu, int data) {
 	char remaining_text[2] = { '0' + (uint8_t)clamp(remaining + 1, 0, 3), '\0'};
 	vec2i_t pos = vec2i(page->items_pos.x, page->items_pos.y + 24);
 	ui_draw_text_centered(remaining_text, ui_scaled_pos(page->items_anchor, pos), UI_SIZE_16, UI_COLOR_DEFAULT);
+	const char *device_text = control_current_player == 1 ? "KEYBOARD OR GAMEPAD 2" : "KEYBOARD OR GAMEPAD 1";
+	ui_draw_text_centered(device_text, ui_scaled_pos(page->items_anchor, vec2i(pos.x, pos.y + 32)), UI_SIZE_8, UI_COLOR_DEFAULT);
 
 	if (remaining <= 0) {
 		input_capture(NULL, NULL);

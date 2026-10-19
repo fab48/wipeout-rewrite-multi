@@ -149,9 +149,13 @@ static void platform_gamepad_add(int device_index) {
 	for (int i = 0; i < GAMEPADS_MAX; i++) {
 		if (!gamepads[i]) {
 			gamepads[i] = SDL_GameControllerOpen(device_index);
+			if (gamepads[i]) {
+				printf("Gamepad %d: %s\n", i + 1, SDL_GameControllerName(gamepads[i]));
+			}
 			return;
 		}
 	}
+	printf("Gamepad ignored, already two: %s\n", SDL_GameControllerNameForIndex(device_index));
 }
 
 static void platform_gamepad_remove(SDL_JoystickID instance_id) {
@@ -159,6 +163,7 @@ static void platform_gamepad_remove(SDL_JoystickID instance_id) {
 	if (slot == -1) {
 		return;
 	}
+	printf("Gamepad %d removed\n", slot + 1);
 	SDL_GameControllerClose(gamepads[slot]);
 	gamepads[slot] = NULL;
 

@@ -38,7 +38,9 @@ Binaries for Linux, Windows and macOS are built by GitHub Actions for every
   ends when the first player finishes; no highscores are recorded.
 - Player 2 controls: Options > Controls > **PLAYER 2 CONTROLS**. Defaults:
   keyboard I/K/J/L, N thrust, B fire, `,`/`.` brakes, O view; second gamepad
-  (SDL build). **SWAP GAMEPADS** exchanges the two pads.
+  (SDL build). **SWAP GAMEPADS** exchanges the two pads. The terminal
+  shows which pad got which number (`Gamepad 1: Xbox Series X Controller`);
+  a pad that comes back after a disconnect takes the first free number.
 
 ## LAN game (up to 8 players)
 
@@ -72,6 +74,7 @@ Binaries for Linux, Windows and macOS are built by GitHub Actions for every
 Tests (no game data needed for the first one):
 
     make net_test && ./net-test                       # protocol, fuzzing, sessions
+    make gamepad_test && ./gamepad-test               # two virtual Xbox pads (SDL >= 2.24)
     make headless
     python tests/lan_soak.py --data path/to/wipeout --players 8 --races 2
     python tests/lan_soak.py --data path/to/wipeout --players 8 --loss 0.05
