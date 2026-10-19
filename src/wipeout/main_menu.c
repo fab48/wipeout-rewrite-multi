@@ -1,4 +1,5 @@
 #include <string.h>
+#include <ctype.h>
 #include "../utils.h"
 #include "../system.h"
 #include "../mem.h"
@@ -293,6 +294,17 @@ static void page_options_control_draw(menu_t *menu, int data) {
 	vec2i_t right_head_pos = vec2i(right - ui_text_width("JOYSTICK", UI_SIZE_8), line_y);
 	ui_draw_text("JOYSTICK", ui_scaled_pos(page->items_anchor, right_head_pos), UI_SIZE_8, UI_COLOR_DEFAULT);
 	line_y += 20;
+
+	// Which pad is gamepad 1 and 2 (on Windows there is no console to print it)
+	for (int i = 0; i < 2; i++) {
+		const char *name = platform_gamepad_name(settings.swap_gamepads ? 1 - i : i);
+		char text[40];
+		snprintf(text, sizeof(text), "GAMEPAD %d  %s", i + 1, name ? name : "NONE");
+		for (char *c = text; *c; c++) {
+			*c = toupper((unsigned char)*c);
+		}
+		ui_draw_text_centered(text, ui_scaled_pos(UI_POS_BOTTOM | UI_POS_CENTER, vec2i(0, -22 + i * 10)), UI_SIZE_8, UI_COLOR_DEFAULT);
+	}
 
 	uint8_t (*buttons)[2] = control_buttons();
 	for (int action = 0; action < NUM_GAME_ACTIONS; action++) {

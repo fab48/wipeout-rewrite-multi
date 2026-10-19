@@ -38,8 +38,9 @@ Binaries for Linux, Windows and macOS are built by GitHub Actions for every
   ends when the first player finishes; no highscores are recorded.
 - Player 2 controls: Options > Controls > **PLAYER 2 CONTROLS**. Defaults:
   keyboard I/K/J/L, N thrust, B fire, `,`/`.` brakes, O view; second gamepad
-  (SDL build). **SWAP GAMEPADS** exchanges the two pads. The terminal
-  shows which pad got which number (`Gamepad 1: Xbox Series X Controller`);
+  (SDL build). **SWAP GAMEPADS** exchanges the two pads. The bottom of
+  the controls pages shows which pad got which number
+  (`GAMEPAD 1  XBOX SERIES X CONTROLLER`, also printed in the terminal);
   a pad that comes back after a disconnect takes the first free number.
 
 ## LAN game (up to 8 players)

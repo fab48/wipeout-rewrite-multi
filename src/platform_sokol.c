@@ -177,6 +177,10 @@ bool platform_get_fullscreen() {
 	return sapp_is_fullscreen();
 }
 
+const char *platform_gamepad_name(int slot) {
+	return NULL; // no gamepads with sokol
+}
+
 void platform_set_fullscreen(bool fullscreen) {
 	if (fullscreen == sapp_is_fullscreen()) {
 		return;

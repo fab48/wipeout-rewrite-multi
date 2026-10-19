@@ -174,6 +174,14 @@ static void platform_gamepad_remove(SDL_JoystickID instance_id) {
 	}
 }
 
+const char *platform_gamepad_name(int slot) {
+	if (slot < 0 || slot >= GAMEPADS_MAX || !gamepads[slot]) {
+		return NULL;
+	}
+	const char *name = SDL_GameControllerName(gamepads[slot]);
+	return name ? name : "UNKNOWN";
+}
+
 static void platform_find_gamepads(void) {
 	for (int i = 0; i < SDL_NumJoysticks(); i++) {
 		platform_gamepad_add(i);
